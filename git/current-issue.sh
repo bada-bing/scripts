@@ -13,5 +13,5 @@ fi
 cd "$1" || { echo "Failed to change directory to $1"; exit 1; }
 
 # Extract the ISSUE_KEY from the current Git branch
-ISSUE_KEY=$(git branch | grep \* | cut -d ' ' -f2 | awk -F'/' '{print $2}')
+ISSUE_KEY=$(git branch --show-current | awk -F'/' '{print $2}')
 echo $ISSUE_KEY
