@@ -2,7 +2,7 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title yabai-swap-north
+# @raycast.title swap-north
 # @raycast.mode compact
 
 # Optional parameters:

@@ -4,7 +4,7 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title yabai-mirror
+# @raycast.title mirror-space (X-axis)
 # @raycast.mode compact
 
 # Optional parameters:

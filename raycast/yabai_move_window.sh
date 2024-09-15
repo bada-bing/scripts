@@ -2,13 +2,13 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title yabai move window
+# @raycast.title move window
 # @raycast.mode compact
 
 # Optional parameters:
 # @raycast.icon ⛵
 # @raycast.argument1 { "type": "text", "placeholder": "Placeholder" }
-# @raycast.packageName Yabai
+# @raycast.packageName yabai
 
 # Raycast Script Commands https://github.com/raycast/script-commands#api
 

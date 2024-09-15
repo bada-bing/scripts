@@ -4,7 +4,7 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title yabai-restart
+# @raycast.title restart-service
 # @raycast.mode compact
 
 # Optional parameters:

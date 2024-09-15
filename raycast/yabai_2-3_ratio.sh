@@ -2,7 +2,7 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title yabai-ratio-two-thirds
+# @raycast.title set-two-thirds-ratio (2-3)
 # @raycast.mode compact
 
 # Optional parameters:

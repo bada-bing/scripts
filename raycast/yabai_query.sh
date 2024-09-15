@@ -2,7 +2,7 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title yabai-query
+# @raycast.title query-window
 # @raycast.mode fullOutput
 
 # Optional parameters:
