@@ -1,0 +1,1 @@
+pgrep -x 'OrbStack' > /dev/null
