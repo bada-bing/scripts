@@ -7,11 +7,21 @@
 # Check if the directory parameter is provided
 if [ -z "$1" ]; then
   echo "Need to provide directory: $0 <directory>"
-  exit 1
+  exit 11
 fi
 
-cd "$1" || { echo "Failed to change directory to $1"; exit 1; }
+cd "$1" || { echo "Failed to change directory to $1"; exit 12; }
 
 # Extract the ISSUE_KEY from the current Git branch
-ISSUE_KEY=$(git branch --show-current | awk -F'/' '{print $2}')
+# Handles two formats:
+# 1. feature/wfc-1039-set_up_an_endpoint (issue key with dash separator)
+# 2. feature/wfc-1039/set_up_an_endpoint (issue key with slash separator)
+BRANCH=$(git branch --show-current)
+ISSUE_KEY=$(echo "$BRANCH" | grep -oE '[A-Za-z]+-[0-9]+' | head -n 1)
+
+if [ -z "$ISSUE_KEY" ]; then
+  echo "No issue key found in branch: $BRANCH" >&2
+  exit 13
+fi
+
 echo $ISSUE_KEY
