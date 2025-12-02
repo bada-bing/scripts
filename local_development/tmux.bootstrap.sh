@@ -15,8 +15,8 @@ if [ -f "$SCRIPT_PATH" ]; then
     exit 0
 else
     tmux rename-window -t $SESSION_NAME:1 "run" # rename the first window
-    if [ -f "$HOME/Library/CloudStorage/Dropbox/toolbox/env/mprocs/$SESSION_NAME.yaml" ]; then
-      tmux send-keys -t $SESSION_NAME:run "mprocs -c /Users/miki/Library/CloudStorage/Dropbox/toolbox/env/mprocs/$SESSION_NAME.yaml" C-m
+    if [ -f "$HOME/Documents/toolbox/env/mprocs/$SESSION_NAME.yaml" ]; then
+      tmux send-keys -t $SESSION_NAME:run "mprocs -c /Users/miki/Documents/toolbox/env/mprocs/$SESSION_NAME.yaml" C-m
     fi
-    tmux new-window -t $SESSION_NAME -n "edit"
+    tmux new-window -t $SESSION_NAME -n "edit" "sh -c '/opt/homebrew/bin/onefetch; exec $SHELL -l'"
 fi
