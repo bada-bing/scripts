@@ -19,4 +19,5 @@ else
       tmux send-keys -t $SESSION_NAME:run "mprocs -c $LOCAL_ENV/mprocs/$SESSION_NAME.yaml" C-m
     fi
     tmux new-window -t $SESSION_NAME -n "edit" "sh -c '/opt/homebrew/bin/onefetch; exec $SHELL -l'"
+    tmux new-window -t $SESSION_NAME -n "gemini"
 fi
