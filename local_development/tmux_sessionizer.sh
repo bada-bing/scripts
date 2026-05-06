@@ -60,6 +60,4 @@ fi
 # run for "run servers and commands"
 # edit for "make changes": editor and lazygit and others?
 
-# what about slumber and yazi?
-
 # destructing a session should destroy the whole environment created by the wa2
