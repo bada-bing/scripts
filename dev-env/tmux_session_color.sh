@@ -1,5 +1,4 @@
 #!/bin/bash
-# ~/src/scripts/tmux/tmux_session_color.sh
 
 session_name="$1"
 side="$2"  # "right" or empty for left

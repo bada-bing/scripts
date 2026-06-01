@@ -20,12 +20,7 @@ function main() {
       displayTaskProgress(taskProgress);
     }
   } catch (error) {
-    // Fail silently if file not found or other read error
-    // Log error for debugging purposes, especially for tmux
-    fs.appendFileSync(
-      "/Users/miki/.gemini/tmp/9150a17a39d4484edfddf81668894351bc9a98a79cc6a12de7a13aa72d7ae597/js_error.log",
-      `[${new Date().toISOString()}] Error: ${error.stack}\n`
-    );
+    // Fail silently if file not found or other read error.
   }
 }
 
