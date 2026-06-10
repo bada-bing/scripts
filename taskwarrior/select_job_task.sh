@@ -7,7 +7,7 @@ LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 # Get all potential task files ONCE to avoid looping `find`
 LOGSEQ_FILES=$(find "$LOGSEQ_GRAPH_PATH/pages" -type f -name "*.md")
 
-# Process tasks and generate lines for fzf
+# Process job tasks and generate lines for fzf
 generate_task_lines() {
     task project:job -backlog export | \
     jq -c 'sort_by(.urgency) | reverse | .[] | select(.status == "pending")' | \
