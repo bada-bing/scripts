@@ -8,9 +8,10 @@ fi
 
 # Search term from the first argument
 SEARCH_TERM="$1"
+LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 
 # Find the file and store the full path
-FILE_PATH=$(find /Users/miki/Documents/Logseq/KB/pages/ -type f -name "*$SEARCH_TERM*")
+FILE_PATH=$(find "$LOGSEQ_GRAPH_PATH/pages" -type f -name "*$SEARCH_TERM*")
 
 # If a file was found, output just the filename
 if [[ -n "$FILE_PATH" ]]; then
