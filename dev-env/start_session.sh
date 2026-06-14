@@ -1,21 +1,51 @@
 #!/bin/bash
 #
-# Automates starting a study session based on a selected Taskwarrior task.
-# - Selects a task from project:study
-# - Finds the repo name from the associated Logseq file (if any)
+# Automates starting a development session based on a selected Taskwarrior task.
+# Usage: start_session.sh <project>
+#
+# - Selects a task from project:<project>
+# - Finds the repo name from the associated Logseq file, if present
 # - Starts/attaches to a tmux session
-# - Opens the corresponding VS Code workspace (if any)
+# - Opens the corresponding VS Code workspace, when a repo is available
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# Get the number of currently active tasks.
-active_count=$(task +ACTIVE count)
+usage() {
+    echo "Usage: $(basename "$0") <project>" >&2
+    echo "Example: $(basename "$0") ops" >&2
+}
+
+PROJECT="${1:-}"
+
+if [[ -z "$PROJECT" ]]; then
+    usage
+    exit 1
+fi
+
+if [[ "$PROJECT" == "-h" || "$PROJECT" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+if [[ ! "$PROJECT" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "Error: project must contain only letters, numbers, dots, underscores, or hyphens." >&2
+    exit 1
+fi
+
 SCRIPTS_DIR="${SCRIPTS_DIR:-$HOME/src/scripts}"
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/src}"
 VSCODE_WORKSPACES_DIR="${VSCODE_WORKSPACES_DIR:-$HOME/Documents/toolbox/env/vs_code/workspaces}"
 LOGSEQ_API_URL="${LOGSEQ_API_URL:-http://localhost:12315/api}"
 LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
+SELECT_TASK_SCRIPT="$SCRIPTS_DIR/taskwarrior/select_task.sh"
 
+if [[ ! -x "$SELECT_TASK_SCRIPT" ]]; then
+    echo "Error: task selector not found or not executable: $SELECT_TASK_SCRIPT" >&2
+    exit 1
+fi
+
+# Get the number of currently active tasks.
+active_count=$(task +ACTIVE count)
 
 if [ "$active_count" -gt 0 ]; then
     echo "You already have an active task. Stop it before starting a new one."
@@ -24,7 +54,7 @@ if [ "$active_count" -gt 0 ]; then
 fi
 
 # --- 1. Select a task and find its file ---
-TASK_DESC=$("$SCRIPTS_DIR/taskwarrior/select_study_task.sh")
+TASK_DESC=$("$SELECT_TASK_SCRIPT" "$PROJECT")
 
 if [[ -z "$TASK_DESC" ]]; then
     echo "No task selected. Exiting."
@@ -43,7 +73,7 @@ echo "--> Fetching task progress from Logseq page:"
 "$SCRIPTS_DIR/tracking_task_progress/get_logseq_task_progress.js" "$LOGSEQ_FILE"
 
 # --- 2. Find the repository name and determine session name ---
-REPO_NAME=$(grep "Source Repository" "$LOGSEQ_FILE" 2>/dev/null | awk -F': ' '{print $2}')
+REPO_NAME=$(awk -F': ' '/Source Repository/ {print $2; exit}' "$LOGSEQ_FILE" 2>/dev/null)
 LOGSEQ_PAGE_NAME=$(basename "$LOGSEQ_FILE" .md)
 
 SESSION_NAME=""
@@ -69,13 +99,15 @@ fi
 
 # --- 4. Open Logseq page ---
 
-# Check if the Logseq API is reachable and the required token is set
+# Check if the Logseq API is reachable and the required token is set.
 if [[ -n "$LOGSEQ_API_TOKEN" ]] && curl --max-time 1 -s "$LOGSEQ_API_URL" > /dev/null; then
     echo "--> Logseq API is running. Opening page '$LOGSEQ_PAGE_NAME' via API..."
+    REQUEST_BODY=$(jq -cn --arg page "$LOGSEQ_PAGE_NAME" \
+        '{method: "logseq.app.pushState", args: ["page", {name: $page}]}')
     curl -s -X POST \
          -H "Authorization: Bearer $LOGSEQ_API_TOKEN" \
          -H "Content-Type: application/json" \
-         -d "{ \"method\": \"logseq.app.pushState\", \"args\": [\"page\", {\"name\": \"$LOGSEQ_PAGE_NAME\"}]}" \
+         -d "$REQUEST_BODY" \
          "$LOGSEQ_API_URL" > /dev/null
 else
     # Fallback logic
@@ -92,17 +124,14 @@ fi
 # First, ensure the session exists by creating it detached if it's not there.
 if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "--> Creating new detached tmux session..."
-    # Create the new session in the background, starting in the likely project directory
     tmux new-session -d -s "$SESSION_NAME" -c "$TMUX_C_PATH"
 fi
 
 # Now, connect to the session in the appropriate way.
 if [[ -z "$TMUX" ]]; then
-    # We are outside of tmux, so attach to it.
     echo "--> Attaching to tmux session '$SESSION_NAME'..."
     tmux attach-session -t "$SESSION_NAME"
 else
-    # We are inside tmux, so switch to the target session.
     echo "--> Switching to tmux session '$SESSION_NAME'..."
     tmux switch-client -t "$SESSION_NAME"
 fi
