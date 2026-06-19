@@ -20,7 +20,7 @@ hostname="[$(hostname -s)]"
 
 # 2. Assemble the content string
 # The content will be the task progress (or "NO ACTIVE TASK") followed by the date.
-content_string=$(printf "%s | %s" "$task_progress" "$datetime")
+content_string="$task_progress"
 
 # 3. Sanitize and calculate visible length
 # The sed command removes tmux formatting sequences like #[...]
