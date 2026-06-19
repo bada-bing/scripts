@@ -15,12 +15,16 @@ session_name="$1"
 # 1. Gather the components
 session_color=$(~/src/scripts/dev-env/tmux_session_color.sh "$session_name" right)
 task_progress=$(~/src/scripts/dev-env/get_active_task_progress.sh)
+timew_today=$(~/src/scripts/tmux_statusbar/get_timew_today.sh)
 datetime=$(date '+%a, %b %e')
 hostname="[$(hostname -s)]"
 
 # 2. Assemble the content string
-# The content will be the task progress (or "NO ACTIVE TASK") followed by the date.
-content_string="$task_progress"
+if [ -n "$timew_today" ]; then
+    content_string="$task_progress  ⏱ $timew_today"
+else
+    content_string="$task_progress"
+fi
 
 # 3. Sanitize and calculate visible length
 # The sed command removes tmux formatting sequences like #[...]
