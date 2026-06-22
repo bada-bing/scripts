@@ -1,7 +1,7 @@
 #! /usr/bin/env bash
 
 SESSION_NAME=$1
-LOCAL_ENV="$HOME/Documents/toolbox/env"
+LOCAL_ENV="${ENV_DIR:-$HOME/Developer/toolbox/private/env}"
 
 # Check if session-specific bootstrap script exists in the local env tmux directory
 SCRIPT_PATH="$LOCAL_ENV/tmux/$SESSION_NAME.tmux.sh"

@@ -23,7 +23,7 @@ sed -i -e "s/^ACTIVE_PROJECT=.*/ACTIVE_PROJECT=$session_name/" ~/src/raycast-ext
 # - for exact lookup you need to use -t='<session_name>' (in that case it will not return true for '<session_name>-extra-words')
 if ! tmux has-session -t=$session_name 2>/dev/null; then
     tmux new-session -d -s $session_name -c $session
-    sh ~/src/scripts/local_development/tmux.bootstrap.sh $session_name
+    sh $HOME/Developer/toolbox/scripts/local_development/tmux.bootstrap.sh $session_name
 fi
 
 # 3. Attach to the selected session
