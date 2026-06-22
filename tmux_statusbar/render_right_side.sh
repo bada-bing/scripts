@@ -13,9 +13,9 @@ session_name="$1"
 # --- Logic ---
 
 # 1. Gather the components
-session_color=$(~/src/scripts/dev-env/tmux_session_color.sh "$session_name" right)
-task_progress=$(~/src/scripts/dev-env/get_active_task_progress.sh)
-timew_today=$(~/src/scripts/tmux_statusbar/get_timew_today.sh)
+session_color=$($HOME/Developer/toolbox/scripts/dev-env/tmux_session_color.sh "$session_name" right)
+task_progress=$($HOME/Developer/toolbox/scripts/dev-env/get_active_task_progress.sh)
+timew_today=$($HOME/Developer/toolbox/scripts/tmux_statusbar/get_timew_today.sh)
 datetime=$(date '+%a, %b %e')
 hostname="[$(hostname -s)]"
 
