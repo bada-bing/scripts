@@ -1,6 +1,6 @@
 #!/bin/sh
 
-ISSUE_ID=$(sh ~/src/scripts/local_development/get_active_task.sh)
+ISSUE_ID=$(sh $HOME/Developer/toolbox/scripts/local_development/get_active_task.sh)
 
 if [ -z "$ISSUE_ID" ]; then
   echo "🚸 WIP" # Active Task not properly set

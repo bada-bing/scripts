@@ -184,7 +184,7 @@ if [[ "$1" == http://localhost:3000/browse/* || "$1" == https://localhost:3000/b
   exit 0
 fi
 
-src_root="/Users/miki/src"
+src_root="${SOURCE_URL_SRC_ROOT:-$HOME/Developer/src}"
 
 if [[ "$1" = /* ]]; then
   file_path="$1"
