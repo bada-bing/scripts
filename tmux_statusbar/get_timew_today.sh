@@ -20,5 +20,8 @@ fi
 # Validate it looks like a duration (H:MM:SS or HH:MM:SS)
 echo "$total" | grep -qE '^[0-9]+:[0-9]{2}:[0-9]{2}$' || exit 0
 
-# Drop seconds for brevity
-echo "$total" | cut -d: -f1,2
+# Count distinct tasks tracked today (tags starting with uppercase = task IDs)
+task_count=$("$TIMEW_BIN" export :day 2>/dev/null | grep -oE '"[A-Z][^"]*"' | tr -d '"' | sort -u | wc -l | tr -d ' ')
+
+# Drop seconds for brevity, append task count
+printf "%s [%sT]\n" "$(echo "$total" | cut -d: -f1,2)" "$task_count"
