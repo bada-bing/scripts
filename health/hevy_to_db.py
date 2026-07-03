@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch today's Hevy workout volume and write it to today's Logseq journal."""
+"""Fetch a day's Hevy workout volume and upsert it into the health store."""
 
 import os
 import sys
@@ -7,10 +7,10 @@ import json
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
-from pathlib import Path
+
+from health_db import connect, get_metrics, refresh_wide_view, upsert_metric
 
 HEVY_API_BASE = "https://api.hevyapp.com"
-LOGSEQ_JOURNALS = Path.home() / "Documents/Logseq/KB/journals"
 
 
 def hevy_get(path: str, api_key: str) -> dict:
@@ -50,34 +50,16 @@ def compute_volume_kg(workouts: list) -> float:
     return total
 
 
-def update_journal(journal_path: Path, volume_kg: float) -> None:
-    if not journal_path.exists():
-        print(f"Journal not found: {journal_path}", file=sys.stderr)
-        sys.exit(1)
-
-    lines = journal_path.read_text().splitlines(keepends=True)
-    updated = False
-    result = []
-    for line in lines:
-        stripped = line.lstrip()
-        item = stripped[2:] if stripped.startswith("- ") else stripped
-        if item.startswith("volume_kg::"):
-            indent = line[: len(line) - len(stripped)]
-            result.append(f"{indent}- volume_kg:: {round(volume_kg)}\n")
-            updated = True
-        elif item.startswith("training::") and item.strip() == "training::":
-            indent = line[: len(line) - len(stripped)]
-            result.append(f"{indent}- training:: L\n")
-        else:
-            result.append(line)
-
-    if not updated:
-        print(f"Warning: 'volume_kg::' not found in {journal_path}. Volume: {round(volume_kg)} kg", file=sys.stderr)
-        print(f"Add manually: volume_kg:: {round(volume_kg)}")
-        return
-
-    journal_path.write_text("".join(result))
-    print(f"volume_kg:: {round(volume_kg)} written to {journal_path.name}")
+def update_store(date: str, volume_kg: float) -> None:
+    conn = connect()
+    upsert_metric(conn, date, "volume", str(round(volume_kg)), "hevy")
+    # seed training with L only when nothing is logged yet; C/S codes come via the health-inbox
+    if not get_metrics(conn, date).get("training"):
+        upsert_metric(conn, date, "training", "L", "hevy")
+    refresh_wide_view(conn)
+    conn.commit()
+    conn.close()
+    print(f"volume:: {round(volume_kg)} written to health store")
 
 
 def main():
@@ -90,14 +72,12 @@ def main():
         try:
             target = datetime.strptime(sys.argv[1], "%Y-%m-%d")
         except ValueError:
-            print("Usage: log_hevy_volume.py [YYYY-MM-DD]", file=sys.stderr)
+            print("Usage: hevy_to_db.py [YYYY-MM-DD]", file=sys.stderr)
             sys.exit(1)
     else:
         target = datetime.now()
 
     today = target.strftime("%Y-%m-%d")
-    journal_filename = target.strftime("%Y_%m_%d") + ".md"
-    journal_path = LOGSEQ_JOURNALS / journal_filename
 
     try:
         workouts = fetch_todays_workouts(api_key, today)
@@ -111,7 +91,7 @@ def main():
 
     volume = compute_volume_kg(workouts)
     print(f"Workouts: {len(workouts)}, Total volume: {round(volume)} kg")
-    update_journal(journal_path, volume)
+    update_store(today, volume)
 
 
 if __name__ == "__main__":

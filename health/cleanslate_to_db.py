@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch today's CleanSlate calorie total and write it to today's Logseq journal."""
+"""Fetch a day's CleanSlate calorie total and upsert it into the health store."""
 
 import os
 import sys
@@ -7,10 +7,10 @@ import json
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
+
+from health_db import connect, refresh_wide_view, upsert_metric
 
 CLEANSLATE_URL = "https://app.cleanslate.sh/auth/graphql"
-LOGSEQ_JOURNALS = Path.home() / "Documents/Logseq/KB/journals"
 
 LOGS_QUERY = """
 query($start: timestamptz!, $end: timestamptz!) {
@@ -88,31 +88,13 @@ def compute_calories(logs: list) -> float:
     return total
 
 
-def update_journal(journal_path: Path, calories: int) -> None:
-    if not journal_path.exists():
-        print(f"Journal not found: {journal_path}", file=sys.stderr)
-        sys.exit(1)
-
-    lines = journal_path.read_text().splitlines(keepends=True)
-    updated = False
-    result = []
-    for line in lines:
-        stripped = line.lstrip()
-        item = stripped[2:] if stripped.startswith("- ") else stripped
-        if item.startswith("calories::"):
-            indent = line[: len(line) - len(stripped)]
-            result.append(f"{indent}- calories:: {calories}\n")
-            updated = True
-        else:
-            result.append(line)
-
-    if not updated:
-        print(f"Warning: 'calories::' not found in {journal_path}. Calories: {calories}", file=sys.stderr)
-        print(f"Add manually: calories:: {calories}")
-        return
-
-    journal_path.write_text("".join(result))
-    print(f"calories:: {calories} written to {journal_path.name}")
+def update_store(date: str, calories: int) -> None:
+    conn = connect()
+    upsert_metric(conn, date, "calories", str(calories), "cleanslate")
+    refresh_wide_view(conn)
+    conn.commit()
+    conn.close()
+    print(f"calories:: {calories} written to health store")
 
 
 def main():
@@ -125,14 +107,12 @@ def main():
         try:
             target = datetime.strptime(sys.argv[1], "%Y-%m-%d")
         except ValueError:
-            print("Usage: cleanslate_to_logseq.py [YYYY-MM-DD]", file=sys.stderr)
+            print("Usage: cleanslate_to_db.py [YYYY-MM-DD]", file=sys.stderr)
             sys.exit(1)
     else:
         target = datetime.now(timezone.utc)
 
     date = target.strftime("%Y-%m-%d")
-    journal_filename = datetime.strptime(date, "%Y-%m-%d").strftime("%Y_%m_%d") + ".md"
-    journal_path = LOGSEQ_JOURNALS / journal_filename
 
     try:
         logs = fetch_logs(token, date)
@@ -146,7 +126,7 @@ def main():
 
     calories = round(compute_calories(logs))
     print(f"Logs: {len(logs)}, Total calories: {calories}")
-    update_journal(journal_path, calories)
+    update_store(date, calories)
 
 
 if __name__ == "__main__":
