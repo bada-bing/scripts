@@ -4,7 +4,7 @@
 # the current NOW item from a matching Logseq page when one exists.
 
 # Ensure node is in the PATH for the tmux environment
-NODE_BIN_DIR="/Users/miki/.config/local/share/mise/installs/node/24.11.1/bin"
+NODE_BIN_DIR="$(dirname "$(/opt/homebrew/bin/mise which node 2>/dev/null)")"
 export PATH="$NODE_BIN_DIR:$PATH"
 
 script_dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )

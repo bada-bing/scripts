@@ -32,11 +32,12 @@ if [[ ! "$PROJECT" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     exit 1
 fi
 
-SCRIPTS_DIR="${SCRIPTS_DIR:-$HOME/src/scripts}"
+SCRIPTS_DIR="${SCRIPTS_DIR:-$HOME/Developer/toolbox/scripts}"
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/src}"
-VSCODE_WORKSPACES_DIR="${VSCODE_WORKSPACES_DIR:-$HOME/Documents/toolbox/env/vs_code/workspaces}"
+VSCODE_WORKSPACES_DIR="${VSCODE_WORKSPACES_DIR:-$HOME/Developer/toolbox/private/env/vs_code/workspaces}"
 LOGSEQ_API_URL="${LOGSEQ_API_URL:-http://localhost:12315/api}"
 LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
+LOGSEQ_APP="${LOGSEQ_APP:-Logseq-OG}"
 SELECT_TASK_SCRIPT="$SCRIPTS_DIR/taskwarrior/select_task.sh"
 
 if [[ ! -x "$SELECT_TASK_SCRIPT" ]]; then
@@ -104,18 +105,21 @@ if [[ -n "$LOGSEQ_API_TOKEN" ]] && curl --max-time 1 -s "$LOGSEQ_API_URL" > /dev
     echo "--> Logseq API is running. Opening page '$LOGSEQ_PAGE_NAME' via API..."
     REQUEST_BODY=$(jq -cn --arg page "$LOGSEQ_PAGE_NAME" \
         '{method: "logseq.app.pushState", args: ["page", {name: $page}]}')
-    curl -s -X POST \
+    LOGSEQ_RESPONSE=$(curl -s -X POST \
          -H "Authorization: Bearer $LOGSEQ_API_TOKEN" \
          -H "Content-Type: application/json" \
          -d "$REQUEST_BODY" \
-         "$LOGSEQ_API_URL" > /dev/null
+         "$LOGSEQ_API_URL")
+    if echo "$LOGSEQ_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+        echo "--> Warning: Logseq API returned an error: $LOGSEQ_RESPONSE" >&2
+    fi
 else
     # Fallback logic
     if [[ -z "$LOGSEQ_API_TOKEN" ]]; then
         echo "--> Warning: LOGSEQ_API_TOKEN environment variable is not set." >&2
     else
         echo "--> Logseq API is not running. Launching Logseq app..."
-        open -a Logseq "$LOGSEQ_GRAPH_PATH"
+        open -a "$LOGSEQ_APP" "$LOGSEQ_GRAPH_PATH"
     fi
     echo "--> Please open the page manually. Click here: logseq://graph/$(basename "$LOGSEQ_GRAPH_PATH")?page=$LOGSEQ_PAGE_NAME"
 fi
@@ -125,6 +129,8 @@ fi
 if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "--> Creating new detached tmux session..."
     tmux new-session -d -s "$SESSION_NAME" -c "$TMUX_C_PATH"
+    echo "--> Bootstrapping session..."
+    bash "$SCRIPTS_DIR/local_development/tmux.bootstrap.sh" "$SESSION_NAME"
 fi
 
 # Now, connect to the session in the appropriate way.
