@@ -1,1 +1,4 @@
 paperless/correspondents.json
+document_management/document_management.env
+__pycache__/
+*.pyc
