@@ -34,6 +34,17 @@ query($ids: [String!]!) {
 }
 """
 
+QUICK_LOGS_QUERY = """
+query($start: timestamptz!, $end: timestamptz!) {
+    quick_logs(where: {
+        createdAt: {_gte: $start, _lt: $end},
+        consumed: {_eq: true}
+    }) {
+        calories
+    }
+}
+"""
+
 
 def graphql(token: str, query: str, variables: dict) -> dict:
     payload = {"token": token, "query": query, "variables": variables}
@@ -46,10 +57,12 @@ def graphql(token: str, query: str, variables: dict) -> dict:
         return json.loads(r.read())
 
 
-def fetch_logs(token: str, date: str) -> list:
+def fetch_logs(token: str, date: str) -> tuple[list, int]:
     start = f"{date}T00:00:00+00:00"
     end = f"{(datetime.strptime(date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')}T00:00:00+00:00"
-    logs = graphql(token, LOGS_QUERY, {"start": start, "end": end})["logs"]
+    vars = {"start": start, "end": end}
+
+    logs = graphql(token, LOGS_QUERY, vars)["logs"]
 
     # Resolve basic food data for logs that reference the built-in food database
     basic_ids = [l["basicFood"] for l in logs if l.get("basicFood") and not l.get("logToFood")]
@@ -60,7 +73,10 @@ def fetch_logs(token: str, date: str) -> list:
             if log.get("basicFood") and not log.get("logToFood"):
                 log["logToFood"] = food_by_id.get(log["basicFood"])
 
-    return logs
+    quick_logs = graphql(token, QUICK_LOGS_QUERY, vars)["quick_logs"]
+    quick_calories = sum(q["calories"] for q in quick_logs if q.get("calories"))
+
+    return logs, quick_calories
 
 
 def calories_for(amount: float, unit: str, food: dict) -> float:
@@ -115,17 +131,17 @@ def main():
     date = target.strftime("%Y-%m-%d")
 
     try:
-        logs = fetch_logs(token, date)
+        logs, quick_calories = fetch_logs(token, date)
     except urllib.error.HTTPError as e:
         print(f"CleanSlate API error {e.code}: {e.read().decode()}", file=sys.stderr)
         sys.exit(1)
 
-    if not logs:
+    if not logs and not quick_calories:
         print(f"No CleanSlate logs found for {date}")
         return
 
-    calories = round(compute_calories(logs))
-    print(f"Logs: {len(logs)}, Total calories: {calories}")
+    calories = round(compute_calories(logs)) + quick_calories
+    print(f"Logs: {len(logs)}, Quick logs: {quick_calories} kcal, Total calories: {calories}")
     update_store(date, calories)
 
 
