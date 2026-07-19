@@ -5,12 +5,31 @@
 # which allows for a consistently sized colored background.
 
 # --- Configuration ---
-TARGET_WIDTH=100
+MAX_TARGET_WIDTH=100   # cap on wide screens
+LEFT_WIDTH=25          # must match MINIMUM_WIDTH in render_left_side.sh
+MIN_CENTER_WIDTH=20    # columns to always leave for the window-list "tabs"
 
 # --- Arguments from tmux ---
 session_name="$1"
+client_width="$2"
 
 # --- Logic ---
+
+# Shrink the right side on narrow terminals so the centered window list
+# (tabs) always has room to render instead of being squeezed out entirely.
+if [ -n "$client_width" ]; then
+    available=$((client_width - LEFT_WIDTH - MIN_CENTER_WIDTH))
+    if [ "$available" -lt 0 ]; then
+        available=0
+    fi
+    if [ "$available" -gt "$MAX_TARGET_WIDTH" ]; then
+        TARGET_WIDTH=$MAX_TARGET_WIDTH
+    else
+        TARGET_WIDTH=$available
+    fi
+else
+    TARGET_WIDTH=$MAX_TARGET_WIDTH
+fi
 
 # 1. Gather the components
 session_color=$($HOME/Developer/toolbox/scripts/dev-env/tmux_session_color.sh "$session_name" right)
