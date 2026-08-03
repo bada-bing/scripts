@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Evaluate health goals against the store.
+"""OBSOLETE — superseded by life_sextant (`sxt report`).
+
+Goal evaluation now lives in `sxt` (metrics + reducers + comparators in health.toml). The
+sxt-era dashboard renderer gets evaluated goals from `sxt report --json`, not from this module.
+Kept only for the legacy `health.db` dashboard path until that is fully retired.
+
+Evaluate health goals against the store.
 
 Reads goals from private/data/health_goals.toml and evaluates each against
 the health store. For daily goals, compares the metric value for the given
