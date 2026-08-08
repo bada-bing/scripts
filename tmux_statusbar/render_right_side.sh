@@ -13,6 +13,31 @@ MIN_CENTER_WIDTH=20    # columns to always leave for the window-list "tabs"
 session_name="$1"
 client_width="$2"
 
+# --- Cache ---
+# tmux re-runs this script on every status redraw, not once per
+# status-interval, and an animated busy marker forces several redraws a
+# second. Gathering the components costs about 100ms - almost all of it
+# Taskwarrior and Timewarrior queries - which is far too much to pay per
+# frame. So the assembled output is reused for a moment.
+#
+# The TTL matches status-interval: the bar is no more stale than it was
+# before anything started forcing redraws. Everything shown here is a
+# minute-resolution figure, so there is nothing to see at frame rate anyway.
+#
+# The key covers both arguments, so a resized client or a different session
+# renders fresh rather than inheriting another one's width. A session name
+# containing a slash simply never matches a cache file, which costs speed
+# and nothing else.
+CACHE_TTL=2s
+CACHE_DIR="${TMPDIR:-/tmp}/tmux-statusbar-cache"
+CACHE_FILE="$CACHE_DIR/right-$session_name-$client_width"
+
+if [ -n "$(find "$CACHE_FILE" -mtime "-$CACHE_TTL" -print -quit 2>/dev/null)" ]; then
+    cat "$CACHE_FILE"
+    exit 0
+fi
+mkdir -p "$CACHE_DIR" 2>/dev/null
+
 # --- Logic ---
 
 # Shrink the right side on narrow terminals so the centered window list
@@ -66,4 +91,6 @@ fi
 
 # 5. Combine the session color with the final, width-adjusted text
 # A reset `#[default]` is used to ensure formatting doesn't leak.
-printf "%s%s#[default]" "$session_color" "$final_text"
+output=$(printf "%s%s#[default]" "$session_color" "$final_text")
+printf '%s' "$output" > "$CACHE_FILE" 2>/dev/null
+printf '%s' "$output"
