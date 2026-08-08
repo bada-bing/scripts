@@ -15,15 +15,4 @@ else
     # Left side - session name with icon
     session_upper=$(echo "$session_name" | tr '[:lower:]' '[:upper:]')
     printf "#[bg=colour%d,bold,fg=colour0]%-3s${session_upper}%-3s❯ #[nobold]" "$color"
-
-    # Convert xterm-256 color to hex (and print them in the statusbar)
-    # For colors 16-231 (216-color cube)
-
-    if [ "$color" -ge 16 ] && [ "$color" -le 231 ]; then
-        idx=$((color - 16))
-        r=$(( (idx / 36) * 51 ))
-        g=$(( ((idx % 36) / 6) * 51 ))
-        b=$(( (idx % 6) * 51 ))
-        printf "#%02x%02x%02x\n" "$r" "$g" "$b"
-    fi
 fi
