@@ -5,7 +5,7 @@
 # which allows for a consistently sized colored background.
 
 # --- Configuration ---
-MAX_TARGET_WIDTH=100   # cap on wide screens
+MAX_TARGET_WIDTH=80    # cap on wide screens
 LEFT_WIDTH=25          # must match MINIMUM_WIDTH in render_left_side.sh
 MIN_CENTER_WIDTH=20    # columns to always leave for the window-list "tabs"
 
