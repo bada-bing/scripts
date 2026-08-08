@@ -30,8 +30,15 @@ if [ "$state" = "waiting" ]; then
 fi
 
 case "$state" in
-    busy|waiting)
-        tmux set-option -w -t "$target" @window_state "$state" 2>/dev/null
+    busy)
+        tmux set-option -w -t "$target" @window_state busy 2>/dev/null
+        # The busy marker animates, which needs a process pushing frames.
+        # run-shell -b hands it to the tmux server, so it outlives the hook
+        # that called this. Starting a second one is a no-op.
+        tmux run-shell -b "$(dirname "$0")/spin_window_state.sh" 2>/dev/null
+        ;;
+    waiting)
+        tmux set-option -w -t "$target" @window_state waiting 2>/dev/null
         ;;
     *)
         # Anything else, including no argument, clears the marker.
