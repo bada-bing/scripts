@@ -56,7 +56,9 @@ else
     if [[ -f "$mprocs_config" ]]; then
         tmux send-keys -t "$SESSION_NAME:run" "mprocs -c $mprocs_config" C-m
     fi
-    tmux new-window -t "$SESSION_NAME:" -n "edit" -c "$session_cwd" "sh -c '/opt/homebrew/bin/onefetch; exec $SHELL -l'"
+    # onefetch errors out when the directory is not a repository, which is the
+    # normal case for a task falling back to tasks/<key>.
+    tmux new-window -t "$SESSION_NAME:" -n "edit" -c "$session_cwd" "sh -c 'git rev-parse --git-dir >/dev/null 2>&1 && /opt/homebrew/bin/onefetch; exec $SHELL -l'"
     tmux new-window -t "$SESSION_NAME:" -n "assistant" -c "$session_cwd"
 fi
 
