@@ -4,13 +4,17 @@
 # Both kinds live in one list, because narrowing to the wrong kind first is how
 # you miss the thing you wanted.
 #
+# Tasks carry today's journal marker and the ones planned for today sort first,
+# so the list opens on the day's queue without hiding everything else.
+#
 # Prints the selection as two tab-separated fields, "task <key>" or
 # "repo <path>", and nothing at all when the picker is dismissed.
 #
-# Usage: select_work.sh
+# Usage: select_work.sh [--tasks]
 
 set -uo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 
 # --tasks drops the repositories: focus starts a task, so offering something it
@@ -18,14 +22,33 @@ LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 tasks_only=false
 [[ "${1:-}" == "--tasks" ]] && tasks_only=true
 
-# Tasks first, most urgent first - a task is the usual reason to open a session.
+# Rank orders the list: what is queued for today first, then what is running,
+# then everything unplanned, and finally what today is already finished with.
+rank_of() {
+    case "$1" in
+        LATER) echo 0 ;;
+        NOW)   echo 1 ;;
+        "")    echo 2 ;;
+        DONE)  echo 3 ;;
+        *)     echo 2 ;;
+    esac
+}
+
 tasks() {
+    local planned
+    planned=$(mktemp) || return 1
+    "$SCRIPT_DIR/journal_work_block.sh" list 2>/dev/null \
+        | awk -F'\t' '$2 != "" { print $2 "\t" $1 }' > "$planned"
+
     task status:pending export 2>/dev/null \
         | jq -r 'sort_by(-.urgency) | .[] | [.description, (.project // "-")] | @tsv' \
         | while IFS=$'\t' read -r key project; do
             page=$(basename "$(ls "$LOGSEQ_GRAPH_PATH/pages/$key"-*.md 2>/dev/null | head -1)" .md 2>/dev/null)
-            printf 'task\t%s\t%s\t%s\n' "$key" "$project" "${page#"$key"-}"
+            marker=$(awk -F'\t' -v k="$key" '$1 == k { print $2; exit }' "$planned")
+            printf '%s\ttask\t%s\t%s\t%s\t%s\n' \
+                "$(rank_of "$marker")" "${marker:--}" "$key" "$project" "${page#"$key"-}"
         done
+    rm -f "$planned"
 }
 
 repos() {
@@ -33,24 +56,26 @@ repos() {
     IFS=':' read -ra roots <<< "${SRC_PATH:-$HOME/Developer/src}"
     find "${roots[@]}" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort \
         | while read -r path; do
-            printf 'repo\t%s\t%s\t%s\n' "$(basename "$path")" "" "$path"
+            printf '4\trepo\t%s\t%s\t%s\t%s\n' "-" "$(basename "$path")" "" "$path"
         done
 }
 
+# -s keeps urgency order within a rank; the rank column is dropped before display.
 selection=$(
     { tasks; $tasks_only || repos; } \
-        | awk -F'\t' '{ printf "%-5s %-30s %-6s %s\n", $1, $2, $3, $4 }' \
+        | sort -s -k1,1n \
+        | awk -F'\t' '{ printf "%-5s %-6s %-30s %-6s %s\n", $2, $3, $4, $5, $6 }' \
         | fzf --height=60% --reverse --prompt="$($tasks_only && echo 'task> ' || echo 'work> ')"
 )
 
 [[ -z "$selection" ]] && exit 0
 
-# The task key is field 2; a repository's path is the last field, which survives
-# the project column being empty for repositories. Neither may contain
-# whitespace, which holds for task keys and for the source roots.
+# Kind is field 1 and the marker field 2, so a task key is field 3; a
+# repository's path is the last field, which survives its project column being
+# empty. Neither may contain whitespace, which holds for keys and source roots.
 kind=$(awk '{print $1}' <<< "$selection")
 case "$kind" in
-    task) printf 'task\t%s\n' "$(awk '{print $2}'  <<< "$selection")" ;;
+    task) printf 'task\t%s\n' "$(awk '{print $3}'  <<< "$selection")" ;;
     repo) printf 'repo\t%s\n' "$(awk '{print $NF}' <<< "$selection")" ;;
     *)    exit 1 ;;
 esac

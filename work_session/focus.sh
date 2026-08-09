@@ -82,11 +82,10 @@ active_key() {
 case "$verb" in
     start)
         if [[ -z "$key" ]]; then
-            selection=$("$SCRIPT_DIR/select_work.sh" --tasks) || exit 1
-            [[ -z "$selection" ]] && exit 0
-            IFS=$'\t' read -r _ key <<< "$selection"
+            echo "Usage: $(basename "$0") start <task-key>" >&2
+            echo "  to pick one: fcs.sh" >&2
+            exit 1
         fi
-        [[ -z "$key" ]] && exit 0
 
         current=$(active_key)
         if [[ -n "$current" && "$current" != "$key" ]]; then
@@ -168,18 +167,33 @@ case "$verb" in
         ;;
 
     status)
+        # NOW means "running right now", so exactly one entry may carry it and
+        # only while Taskwarrior agrees. Anything else is drift between the two,
+        # and drift that is not reported is drift that gets believed.
         key=$(active_key)
+        now_keys=$("$BLOCK" list | awk -F'\t' '$1 == "NOW" { print $2 }')
+        now_count=$(printf '%s' "$now_keys" | grep -c . || true)
+
+        drift=""
+        if [[ "$now_count" -gt 1 ]]; then
+            drift="$now_count entries are NOW: $(printf '%s' "$now_keys" | tr '\n' ' ')"
+        elif [[ -n "$key" && "$now_keys" != "$key" ]]; then
+            drift="Taskwarrior is running '$key' but the journal's NOW is '${now_keys:-none}'"
+        elif [[ -z "$key" && -n "$now_keys" ]]; then
+            drift="the journal says NOW '$now_keys' but nothing is running"
+        fi
+
         if [[ -z "$key" ]]; then
             echo "focus: nothing active"
         else
             elapsed=$(timew get dom.active.duration 2>/dev/null || true)
             printf 'focus: %s%s\n' "$key" "${elapsed:+ (${elapsed})}"
-        fi
+            if [[ -n "$now_keys" ]]; then
+                printf '  journal: NOW\n'
+            else
+                printf '  journal: no NOW entry today\n'
+            fi
 
-        marker=$("$BLOCK" list | awk -F'\t' -v k="${key:-}" '$2 == k { print $1; exit }')
-        [[ -n "$key" ]] && printf '  journal: %s\n' "${marker:-no entry today}"
-
-        if [[ -n "$key" ]]; then
             session=$(printf '%s' "$key" | tr '.:' '--')
             if tmux has-session -t="$session" 2>/dev/null; then
                 printf '  session: %s\n' "$session"
@@ -187,10 +201,16 @@ case "$verb" in
                 printf '  session: none\n'
             fi
         fi
+
+        if [[ -n "$drift" ]]; then
+            echo "Error: $drift" >&2
+            echo "  focus.sh stop clears the marker, or set it by hand" >&2
+            exit 1
+        fi
         ;;
 
     *)
-        echo "Usage: $(basename "$0") start [<task-key>] | stop [--later|--done] | status" >&2
+        echo "Usage: $(basename "$0") start <task-key> | stop [--later|--done] | status" >&2
         exit 1
         ;;
 esac
