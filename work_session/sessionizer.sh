@@ -11,11 +11,11 @@ set -uo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-# Get first level directories from all roots in PROJECTS_PATH and select one.
-# IFS=':' sets the field separator for this command only; -ra reads into an
-# array without interpreting backslashes.
-IFS=':' read -ra project_dirs <<< "${PROJECTS_PATH:-$HOME/Developer/src}"
-selection=$(find "${project_dirs[@]}" -maxdepth 1 -mindepth 1 -type d | fzf)
+# Get first level directories from all roots in SRC_PATH and select one. IFS=':'
+# sets the field separator for this command only; -ra reads into an array
+# without interpreting backslashes.
+IFS=':' read -ra src_roots <<< "${SRC_PATH:-$HOME/Developer/src}"
+selection=$(find "${src_roots[@]}" -maxdepth 1 -mindepth 1 -type d | fzf)
 
 if [[ -z "$selection" ]]; then
     exit 0
