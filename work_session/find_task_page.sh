@@ -33,14 +33,14 @@ shopt -u nullglob
 
 case ${#matches[@]} in
     0)
-        echo "No Logseq page for task '$task_key' in $pages_dir" >&2
+        echo "Error: no Logseq page for task '$task_key' in $pages_dir" >&2
         exit 1
         ;;
     1)
         echo "${matches[0]}"
         ;;
     *)
-        echo "Ambiguous: ${#matches[@]} pages match task '$task_key'" >&2
+        echo "Error: ambiguous, ${#matches[@]} pages match task '$task_key'" >&2
         printf '  %s\n' "${matches[@]}" >&2
         exit 1
         ;;
