@@ -13,6 +13,11 @@ set -uo pipefail
 
 LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 
+# --tasks drops the repositories: focus starts a task, so offering something it
+# cannot start would only be a way to pick wrong.
+tasks_only=false
+[[ "${1:-}" == "--tasks" ]] && tasks_only=true
+
 # Tasks first, most urgent first - a task is the usual reason to open a session.
 tasks() {
     task status:pending export 2>/dev/null \
@@ -33,9 +38,9 @@ repos() {
 }
 
 selection=$(
-    { tasks; repos; } \
+    { tasks; $tasks_only || repos; } \
         | awk -F'\t' '{ printf "%-5s %-30s %-6s %s\n", $1, $2, $3, $4 }' \
-        | fzf --height=60% --reverse --prompt='work> '
+        | fzf --height=60% --reverse --prompt="$($tasks_only && echo 'task> ' || echo 'work> ')"
 )
 
 [[ -z "$selection" ]] && exit 0

@@ -18,15 +18,21 @@
 set -euo pipefail
 
 toggle=false
-if [[ "${1:-}" == "--toggle" ]]; then
-  toggle=true
-  shift
-fi
+window_arg=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --toggle) toggle=true; shift ;;
+    --window) window_arg="${2:-}"; shift 2 ;;   # e.g. WFC-1146:edit
+    *)        break ;;
+  esac
+done
 
 query="${1:-}"
-kb="$HOME/Documents/Logseq/KB"
+kb="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 title="logseq-page"
-window="$(tmux display-message -p '#{window_id}')"
+# The caller may name a window in another session - that is how focus lands a
+# task's page in the session it will be worked in.
+window="${window_arg:-$(tmux display-message -p '#{window_id}')}"
 
 # zsh -l so .zprofile is sourced and PATH includes Homebrew (fzf, bat, nvim).
 cmd="zsh -l -c '
