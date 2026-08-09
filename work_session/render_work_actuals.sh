@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 #
-# Annotates a day's "# Work" entries with what Timewarrior recorded for them:
-# the number of sessions and the time they add up to, e.g. "2S (3h)".
+# Renders a day's "# Work" annotations from Timewarrior: the number of sessions
+# and the time they add up to, e.g. "2S (3h)".
+#
+# One-way, like the journal's "# Health" block. Every run reads Timewarrior and
+# rewrites every entry, so correcting an interval by hand - or deleting one -
+# is reflected the next time this runs. An entry left with no intervals loses
+# its annotation rather than keeping a figure nothing supports any more.
 #
 # The journal says what was planned; this is the half that says what happened.
 # Nothing here writes markers - that belongs to focus.sh.
-#
-# Re-running replaces the annotation rather than appending to it, so correcting
-# an interval by hand and running this again fixes the journal.
 #
 # Usage: render_work_actuals.sh [YYYY-MM-DD] [--dry-run]
 
@@ -79,10 +81,16 @@ per_key=$(
     '
 )
 
-if [[ -z "$per_key" ]]; then
-    echo "No intervals recorded on $day" >&2
-    exit 0
-fi
+# A day with no intervals is not an early exit: its entries still have to lose
+# any annotation they carry, which is the whole point of rendering from the
+# store rather than adding to what is already written.
+[[ -z "$per_key" ]] && echo "No intervals recorded on $day" >&2
+
+# What Timewarrior says, as key -> annotation. This is the whole truth for the
+# day: anything absent from it has no time recorded against it.
+actuals=$(mktemp) || exit 1
+seen=$(mktemp) || exit 1
+trap 'rm -f "$actuals" "$seen"; $owns_copy && rm -f "$work_file"' EXIT
 
 while IFS=$'\t' read -r key sessions seconds; do
     [[ -z "$key" ]] && continue
@@ -94,16 +102,32 @@ while IFS=$'\t' read -r key sessions seconds; do
         continue
     fi
 
-    # Time logged for something the day never planned means focus was bypassed.
-    # Record it unmarked - it happened, it just was not planned - rather than
-    # letting the record quietly omit real work.
-    if ! "$BLOCK" list --date "$day" $block_opts | cut -f2 | grep -qx "$key"; then
-        "$BLOCK" set-marker "$key" - --date "$day" $block_opts
-    fi
-
-    annotation="${sessions}S ($(format_duration "$seconds"))"
-    "$BLOCK" annotate "$key" "$annotation" --date "$day" $block_opts
-    echo "$key: $annotation"
+    printf '%s\t%sS (%s)\n' "$key" "$sessions" "$(format_duration "$seconds")" >> "$actuals"
 done <<< "$per_key"
+
+# Every entry naming a task is rewritten from that truth, so one whose intervals
+# were deleted loses its annotation instead of keeping a figure nothing supports.
+while IFS= read -r key; do
+    [[ -z "$key" ]] && continue
+    annotation=$(awk -F'\t' -v k="$key" '$1 == k { print $2; exit }' "$actuals")
+    "$BLOCK" annotate "$key" "$annotation" --date "$day" $block_opts
+    printf '%s\n' "$key" >> "$seen"
+    if [[ -n "$annotation" ]]; then
+        echo "$key: $annotation"
+    else
+        echo "$key: no time recorded"
+    fi
+done < <("$BLOCK" list --date "$day" $block_opts | awk -F'\t' '$2 != "" { print $2 }')
+
+# Time logged for something the day never planned means focus was bypassed.
+# Record it unmarked - it happened, it just was not planned - rather than
+# letting the record quietly omit real work.
+while IFS=$'\t' read -r key annotation; do
+    [[ -z "$key" ]] && continue
+    grep -qx "$key" "$seen" 2>/dev/null && continue
+    "$BLOCK" set-marker "$key" - --date "$day" $block_opts
+    "$BLOCK" annotate "$key" "$annotation" --date "$day" $block_opts
+    echo "$key: $annotation (unplanned)"
+done < "$actuals"
 
 $owns_copy && "$BLOCK" diff --date "$day" $block_opts
