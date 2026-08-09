@@ -17,11 +17,14 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 BLOCK="$SCRIPT_DIR/journal_work_block.sh"
 
 day=""
-dry_run=""
-for arg in "$@"; do
-    case "$arg" in
-        --dry-run) dry_run="--dry-run" ;;
-        *)         day="$arg" ;;
+dry_run=false
+work_file=""
+owns_copy=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)   dry_run=true; shift ;;
+        --work-file) work_file="${2:-}"; shift 2 ;;
+        *)           day="$1"; shift ;;
     esac
 done
 
@@ -31,6 +34,19 @@ if [[ ! "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     exit 1
 fi
 next_day=$(date -j -v+1d -f '%Y-%m-%d' "$day" '+%Y-%m-%d')
+
+# Annotating several tasks means several edits, so they are applied to one
+# working copy and diffed together. A caller mid-sequence passes its own copy
+# and diffs when its whole change is assembled.
+block_opts=""
+if [[ -n "$work_file" ]]; then
+    block_opts="--work-file $work_file"
+elif $dry_run; then
+    work_file=$(mktemp -u "${TMPDIR:-/tmp}/render-actuals.XXXXXX")
+    block_opts="--work-file $work_file"
+    owns_copy=true
+    trap '[[ -n "$work_file" ]] && rm -f "$work_file"' EXIT
+fi
 
 # "3h", "2h30m", "45m" - the shape used in the journal.
 format_duration() {
@@ -81,11 +97,13 @@ while IFS=$'\t' read -r key sessions seconds; do
     # Time logged for something the day never planned means focus was bypassed.
     # Record it unmarked - it happened, it just was not planned - rather than
     # letting the record quietly omit real work.
-    if ! "$BLOCK" list --date "$day" | cut -f2 | grep -qx "$key"; then
-        "$BLOCK" set-marker "$key" - --date "$day" $dry_run
+    if ! "$BLOCK" list --date "$day" $block_opts | cut -f2 | grep -qx "$key"; then
+        "$BLOCK" set-marker "$key" - --date "$day" $block_opts
     fi
 
     annotation="${sessions}S ($(format_duration "$seconds"))"
-    "$BLOCK" annotate "$key" "$annotation" --date "$day" $dry_run
+    "$BLOCK" annotate "$key" "$annotation" --date "$day" $block_opts
     echo "$key: $annotation"
 done <<< "$per_key"
+
+$owns_copy && "$BLOCK" diff --date "$day" $block_opts

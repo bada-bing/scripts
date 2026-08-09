@@ -9,30 +9,41 @@
 #
 # Usage:
 #   journal_work_block.sh list                                 [--date D]
-#   journal_work_block.sh set-marker <key> <LATER|NOW|DONE|->   [--date D] [--dry-run]
-#   journal_work_block.sh annotate   <key> <text>               [--date D] [--dry-run]
-#   journal_work_block.sh demote-now                            [--date D] [--dry-run]
+#   journal_work_block.sh set-marker <key> <LATER|NOW|DONE|->   [--date D]
+#   journal_work_block.sh annotate   <key> <text>               [--date D]
+#   journal_work_block.sh demote-now                            [--date D]
+#   journal_work_block.sh diff                                  [--date D]
 #
-# --date defaults to today. --dry-run prints a unified diff and writes nothing.
+# --date defaults to today. list prints TSV: marker, key, annotation, text.
 #
-# list prints TSV: marker, key, annotation, full entry text.
+# Dry runs work by applying the real edits to a working copy and diffing it
+# against the journal, so what is shown is what would happen - not a guess.
+#
+#   --work-file <path>  operate on that copy, creating it from the journal (or
+#                       the template) on first use. Several calls threaded
+#                       through one copy compose, which is what a caller
+#                       making more than one edit needs.
+#   diff                print the copy's difference from the journal.
+#   --dry-run           shorthand for a single edit: use a private copy, diff
+#                       it, discard it.
 
 set -uo pipefail
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 
 verb="${1:-}"
 shift || true
 
 date_arg=""
+work_file=""
 dry_run=false
 args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --date)    date_arg="${2:-}"; shift 2 ;;
-        --dry-run) dry_run=true; shift ;;
-        *)         args+=("$1"); shift ;;
+        --date)      date_arg="${2:-}"; shift 2 ;;
+        --work-file) work_file="${2:-}"; shift 2 ;;
+        --dry-run)   dry_run=true; shift ;;
+        *)           args+=("$1"); shift ;;
     esac
 done
 
@@ -41,17 +52,26 @@ if [[ ! "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     echo "Error: --date must be YYYY-MM-DD, got '$day'" >&2
     exit 1
 fi
+
 journal="$LOGSEQ_GRAPH_PATH/journals/${day//-/_}.md"
 
-# Logseq applies :default-templates {:journals "_DAILY_TEMPLATE_"} only when it
-# creates the journal page itself, so a file written here would suppress it.
-# Rendering from the template page instead keeps its content in one place -
-# sxt_journal_to_logseq.py materializes a missing journal the same way.
-ensure_journal() {
-    [[ -f "$journal" ]] && return 0
+# Where edits land: the journal itself, a copy the caller threads between
+# calls, or a private copy for a one-shot dry run.
+owns_copy=false
+if [[ -n "$work_file" ]]; then
+    target="$work_file"
+elif $dry_run; then
+    target=$(mktemp -u "${TMPDIR:-/tmp}/journal-work-block.XXXXXX")
+    owns_copy=true
+else
+    target="$journal"
+fi
 
-    # Only the template's indented children belong in a journal, dedented one
-    # level; the property lines under its own heading are skipped.
+# Only the template's indented children belong in a journal, dedented one
+# level; the property lines under its own heading are skipped. Logseq applies
+# :default-templates only when it creates the page itself, so a journal written
+# here has to render the same skeleton - read live, never copied.
+render_template() {
     awk '
         /^template:: _DAILY_TEMPLATE_$/ { found = 1; next }
         found && !body && /^\t/         { body = 1 }
@@ -60,13 +80,36 @@ ensure_journal() {
             sub(/^\t/, "")
             print
         }
-    ' "$LOGSEQ_GRAPH_PATH/pages/_templates_.md" > "$journal"
+    ' "$LOGSEQ_GRAPH_PATH/pages/_templates_.md"
+}
 
-    if [[ ! -s "$journal" ]]; then
-        rm -f "$journal"
+# True once there is a block to edit - either the journal exists, or a working
+# copy has already been started from it.
+have_block() {
+    [[ -f "$target" || -f "$journal" ]]
+}
+
+ensure_target() {
+    [[ -f "$target" ]] && return 0
+
+    if [[ -f "$journal" && "$target" != "$journal" ]]; then
+        cp "$journal" "$target"
+        return 0
+    fi
+
+    [[ "$target" == "$journal" ]] || echo "would create $journal from _DAILY_TEMPLATE_" >&2
+    render_template > "$target"
+    if [[ ! -s "$target" ]]; then
+        rm -f "$target"
         echo "Error: could not render _DAILY_TEMPLATE_ from $LOGSEQ_GRAPH_PATH/pages/_templates_.md" >&2
         return 1
     fi
+}
+
+show_diff() {
+    local from=/dev/null
+    [[ -f "$journal" ]] && from="$journal"
+    diff -u --label "$journal" --label "$journal (would become)" "$from" "$1" || true
 }
 
 # Shared vocabulary for the awk programs below. The "# Work" heading sits at
@@ -96,36 +139,39 @@ function entry_for_key(l, key,   at, rest) {
 }
 PRELUDE
 
-# Runs an awk program over the journal and either writes the result back or
-# shows what it would have changed. Trailing arguments are awk options.
+# Applies an awk program to the target and writes the result back. Trailing
+# arguments are awk options.
 transform() {
     local program="$1"; shift
-    ensure_journal || return 1
+    ensure_target || return 1
 
     local updated
     updated=$(mktemp) || return 1
     if ! awk "$@" "$AWK_PRELUDE
-$program" "$journal" > "$updated"; then
+$program" "$target" > "$updated"; then
         rm -f "$updated"
         return 1
     fi
 
-    if $dry_run; then
-        diff -u --label "$journal" --label "$journal (would become)" \
-            "$journal" "$updated" || true
-        rm -f "$updated"
-        return 0
-    fi
-
     # Written through the same inode, so Logseq's watcher sees a modification
     # rather than a replacement and the file keeps its permissions.
-    cat "$updated" > "$journal"
+    cat "$updated" > "$target"
     rm -f "$updated"
+
+    if $owns_copy; then
+        show_diff "$target"
+        rm -f "$target"
+    fi
 }
 
 case "$verb" in
     list)
-        [[ -f "$journal" ]] || exit 0
+        # A working copy is read when one exists, so a caller mid-sequence sees
+        # the state it has built up rather than the journal on disk.
+        source_file="$journal"
+        [[ -f "$target" ]] && source_file="$target"
+        [[ -f "$source_file" ]] || exit 0
+
         awk "$AWK_PRELUDE"'
             is_work_heading($0)        { inblock = 1; next }
             inblock && is_top_level($0) { inblock = 0 }
@@ -147,7 +193,12 @@ case "$verb" in
                 }
                 printf "%s\t%s\t%s\t%s\n", marker, key, annot, text
             }
-        ' "$journal"
+        ' "$source_file"
+        ;;
+
+    diff)
+        [[ -f "$target" ]] || exit 0
+        show_diff "$target"
         ;;
 
     set-marker)
@@ -165,7 +216,7 @@ case "$verb" in
         # Inserting a new entry needs the page's full name, which only the page
         # itself knows; a key with no page is still recorded, under the key.
         page="$key"
-        if page_path=$("$SCRIPT_DIR/find_task_page.sh" "$key" 2>/dev/null); then
+        if page_path=$("$(cd "$(dirname "$0")" && pwd)/find_task_page.sh" "$key" 2>/dev/null); then
             page=$(basename "$page_path" .md)
         fi
 
@@ -198,6 +249,9 @@ case "$verb" in
             echo "Usage: $(basename "$0") annotate <key> <text>" >&2
             exit 1
         fi
+        # Nothing to annotate in a day that was never written.
+        have_block || exit 0
+
         # The annotation replaces whatever trails the link, so re-running it
         # after a corrected Timewarrior interval overwrites rather than appends.
         transform '
@@ -215,6 +269,9 @@ case "$verb" in
         ;;
 
     demote-now)
+        # No journal means no NOW to stand down.
+        have_block || exit 0
+
         # Only one thing is in progress at a time, so starting a task stands
         # down whatever else still claims NOW.
         transform '
@@ -228,7 +285,7 @@ case "$verb" in
         ;;
 
     *)
-        echo "Usage: $(basename "$0") list|set-marker|annotate|demote-now [...]" >&2
+        echo "Usage: $(basename "$0") list|set-marker|annotate|demote-now|diff [...]" >&2
         exit 1
         ;;
 esac
