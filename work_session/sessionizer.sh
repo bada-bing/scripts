@@ -22,7 +22,7 @@ sed -i -e "s/^ACTIVE_PROJECT=.*/ACTIVE_PROJECT=$session_name/" ~/Developer/src/r
 # - for exact lookup you need to use -t='<session_name>' (in that case it will not return true for '<session_name>-extra-words')
 if ! tmux has-session -t=$session_name 2>/dev/null; then
     tmux new-session -d -s $session_name -c $session
-    sh $HOME/Developer/toolbox/scripts/local_development/tmux.bootstrap.sh $session_name $session
+    sh $HOME/Developer/toolbox/scripts/tmux/bootstrap_session.sh $session_name $session
 fi
 
 # 3. Attach to the selected session

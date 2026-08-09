@@ -38,7 +38,7 @@ VSCODE_WORKSPACES_DIR="${VSCODE_WORKSPACES_DIR:-$HOME/Developer/toolbox/private/
 LOGSEQ_API_URL="${LOGSEQ_API_URL:-http://localhost:12315/api}"
 LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 LOGSEQ_APP="${LOGSEQ_APP:-Logseq-OG}"
-SELECT_TASK_SCRIPT="$SCRIPTS_DIR/taskwarrior/select_task.sh"
+SELECT_TASK_SCRIPT="$SCRIPTS_DIR/work_session/select_task.sh"
 
 if [[ ! -x "$SELECT_TASK_SCRIPT" ]]; then
     echo "Error: task selector not found or not executable: $SELECT_TASK_SCRIPT" >&2
@@ -62,7 +62,7 @@ if [[ -z "$TASK_DESC" ]]; then
     exit 0
 fi
 
-LOGSEQ_FILE=$("$SCRIPTS_DIR/taskwarrior/find_logseq_file.sh" "$TASK_DESC")
+LOGSEQ_FILE=$("$SCRIPTS_DIR/work_session/find_logseq_file.sh" "$TASK_DESC")
 
 if [[ -z "$LOGSEQ_FILE" ]]; then
     echo "Error: Could not find Logseq file for task '$TASK_DESC'." >&2
@@ -130,7 +130,7 @@ if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "--> Creating new detached tmux session..."
     tmux new-session -d -s "$SESSION_NAME" -c "$TMUX_C_PATH"
     echo "--> Bootstrapping session..."
-    bash "$SCRIPTS_DIR/local_development/tmux.bootstrap.sh" "$SESSION_NAME"
+    bash "$SCRIPTS_DIR/tmux/bootstrap_session.sh" "$SESSION_NAME"
 fi
 
 # Now, connect to the session in the appropriate way.

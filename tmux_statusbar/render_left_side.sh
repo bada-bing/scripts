@@ -52,7 +52,7 @@ elif [ "$pane_mode" = "view-mode" ]; then
   raw_output=$(printf "#[bold,bg=%s,fg=%s]   VIEW" "$TMUX_MODE_VIEW_BG" "$TMUX_MODE_PREFIX_FG")
 else
   # Default: show session name
-  raw_output=$("$HOME/Developer/toolbox/scripts/dev-env/tmux_session_color.sh" "$session_name")
+  raw_output=$("$HOME/Developer/toolbox/scripts/tmux_statusbar/session_color.sh" "$session_name")
 fi
 
 # 2. Append the attention indicator: how many windows are waiting on Miki,
