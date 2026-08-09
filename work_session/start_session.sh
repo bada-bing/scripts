@@ -62,7 +62,7 @@ if [[ -z "$TASK_DESC" ]]; then
     exit 0
 fi
 
-LOGSEQ_FILE=$("$SCRIPTS_DIR/work_session/find_logseq_file.sh" "$TASK_DESC")
+LOGSEQ_FILE=$("$SCRIPTS_DIR/work_session/find_task_page.sh" "$TASK_DESC")
 
 if [[ -z "$LOGSEQ_FILE" ]]; then
     echo "Error: Could not find Logseq file for task '$TASK_DESC'." >&2
