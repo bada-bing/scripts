@@ -17,6 +17,17 @@
 state="$1"
 target="${2:-$TMUX_PANE}"
 
+# A resumed session runs under the background daemon, which strips TMUX_PANE
+# from the process the hooks fire in but leaves it on an ancestor. Inherit it
+# from the nearest ancestor that still has one, so those hooks keep marking
+# the window the session is being watched in.
+pid=$$
+while [ -z "$target" ] && [ "$pid" -gt 1 ]; do
+    target=$(ps eww -o command= "$pid" 2>/dev/null | tr ' ' '\n' | sed -n 's/^TMUX_PANE=//p' | head -1)
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -z "$pid" ] && break
+done
+
 # Outside tmux there is no window to mark.
 [ -z "$target" ] && exit 0
 
