@@ -125,13 +125,9 @@ else
 fi
 
 # --- 5. Start or attach to tmux session ---
-# First, ensure the session exists by creating it detached if it's not there.
-if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-    echo "--> Creating new detached tmux session..."
-    tmux new-session -d -s "$SESSION_NAME" -c "$TMUX_C_PATH"
-    echo "--> Bootstrapping session..."
-    bash "$SCRIPTS_DIR/tmux/bootstrap_session.sh" "$SESSION_NAME"
-fi
+# Creating and laying out the session is a no-op when it already exists.
+echo "--> Ensuring tmux session exists..."
+"$SCRIPTS_DIR/tmux/bootstrap_session.sh" "$SESSION_NAME" "$TMUX_C_PATH" "$REPO_NAME" > /dev/null
 
 # Now, connect to the session in the appropriate way.
 if [[ -z "$TMUX" ]]; then
