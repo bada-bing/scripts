@@ -10,6 +10,8 @@
 
 set -uo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
 SESSION_NAME="${1:-}"   # sourced layout scripts read this - do not rename
 session_cwd="${2:-}"
 layout="${3:-}"
@@ -54,7 +56,7 @@ else
 
     tmux rename-window -t "$SESSION_NAME:1" "run"
     if [[ -f "$mprocs_config" ]]; then
-        tmux send-keys -t "$SESSION_NAME:run" "mprocs -c $mprocs_config" C-m
+        tmux send-keys -t "$SESSION_NAME:run" "$SCRIPT_DIR/ensure_single_mprocs.sh $mprocs_config" C-m
     fi
     # onefetch errors out when the directory is not a repository, which is the
     # normal case for a task falling back to tasks/<key>.
