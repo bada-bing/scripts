@@ -22,7 +22,7 @@ fi
 FINAL_OUTPUT="Task $TASK_DESCRIPTION"
 
 # 4. Try to find the corresponding file in Logseq
-LOGSEQ_GRAPH_PATH="${LS_DIR:-$HOME/Documents/Logseq/KB}"
+LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 
 if [ ! -d "$LOGSEQ_GRAPH_PATH" ]; then
     echo "$FINAL_OUTPUT"
