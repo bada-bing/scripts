@@ -11,6 +11,9 @@
 #   journal_work_block.sh list                                 [--date D]
 #   journal_work_block.sh set-marker <key> <LATER|NOW|DONE|->   [--date D]
 #   journal_work_block.sh annotate   <key> <text>               [--date D]
+#   journal_work_block.sh add        <text>                     [--date D]
+#   journal_work_block.sh remove     <key-or-exact-text>        [--date D]
+#   journal_work_block.sh strip-markers                         [--date D]
 #   journal_work_block.sh demote-now                            [--date D]
 #   journal_work_block.sh diff                                  [--date D]
 #
@@ -268,6 +271,69 @@ case "$verb" in
         ' -v key="$key" -v annot="$annot"
         ;;
 
+    add)
+        text="${args[0]:-}"
+        if [[ -z "$text" ]]; then
+            echo "Usage: $(basename "$0") add <text>" >&2
+            exit 1
+        fi
+        # Verbatim, marker included if the caller wrote one - this is how an
+        # entry with no [[page]] to look up gets carried from one day to another.
+        transform '
+            is_work_heading($0) { inblock = 1; print; next }
+            inblock && is_top_level($0) {
+                if (!added) { print "\t- " text; added = 1 }
+                inblock = 0
+            }
+            { print }
+            END { if (inblock && !added) print "\t- " text }
+        ' -v text="$text"
+        ;;
+
+    strip-markers)
+        # Sealing a day turns its queue into a record, and a record has no
+        # states. Every entry loses its marker, plain-text ones included, which
+        # is why this is one pass over the block rather than a call per entry.
+        have_block || exit 0
+
+        transform '
+            is_work_heading($0)        { inblock = 1; print; next }
+            inblock && is_top_level($0) { inblock = 0 }
+            inblock && is_entry($0) {
+                sub(/^\t- (LATER|NOW|DONE) /, "\t- ")
+            }
+            { print }
+        '
+        ;;
+
+    remove)
+        key="${args[0]:-}"
+        if [[ -z "$key" ]]; then
+            echo "Usage: $(basename "$0") remove <key-or-exact-text>" >&2
+            exit 1
+        fi
+        have_block || exit 0
+
+        # Selected by task key, or by its exact text when it has no [[page]] to
+        # be keyed by. Anything indented under the entry belongs to it and goes
+        # too.
+        transform '
+            function entry_text(l) {
+                sub(/^\t- /, "", l)
+                sub(/^(LATER|NOW|DONE) /, "", l)
+                return l
+            }
+            is_work_heading($0) { inblock = 1; print; next }
+            inblock && is_top_level($0) { inblock = 0 }
+            inblock && is_entry($0) && (entry_for_key($0, key) || entry_text($0) == key) { skip = 1; next }
+            inblock && skip {
+                if (is_entry($0) || is_top_level($0)) skip = 0
+                else next
+            }
+            { print }
+        ' -v key="$key"
+        ;;
+
     demote-now)
         # No journal means no NOW to stand down.
         have_block || exit 0
@@ -285,7 +351,7 @@ case "$verb" in
         ;;
 
     *)
-        echo "Usage: $(basename "$0") list|set-marker|annotate|demote-now|diff [...]" >&2
+        echo "Usage: $(basename "$0") list|set-marker|annotate|add|remove|strip-markers|demote-now|diff [...]" >&2
         exit 1
         ;;
 esac
