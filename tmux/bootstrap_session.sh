@@ -56,8 +56,8 @@ else
     if [[ -f "$mprocs_config" ]]; then
         tmux send-keys -t "$SESSION_NAME:run" "mprocs -c $mprocs_config" C-m
     fi
-    tmux new-window -t "$SESSION_NAME" -n "edit" -c "$session_cwd" "sh -c '/opt/homebrew/bin/onefetch; exec $SHELL -l'"
-    tmux new-window -t "$SESSION_NAME" -n "assistant" -c "$session_cwd"
+    tmux new-window -t "$SESSION_NAME:" -n "edit" -c "$session_cwd" "sh -c '/opt/homebrew/bin/onefetch; exec $SHELL -l'"
+    tmux new-window -t "$SESSION_NAME:" -n "assistant" -c "$session_cwd"
 fi
 
 echo "$SESSION_NAME"
