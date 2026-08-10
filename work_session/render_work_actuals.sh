@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Renders a day's "# Work" annotations from Timewarrior: the number of sessions
-# and the time they add up to, e.g. "2S (3h)".
+# Renders a day's "# Work" block from Timewarrior - the day's record: one entry
+# per task worked on, with the number of sessions and the time they add up to.
 #
-# One-way, like the journal's "# Health" block. Every run reads Timewarrior and
-# rewrites every entry, so correcting an interval by hand - or deleting one -
-# is reflected the next time this runs. An entry left with no intervals loses
-# its annotation rather than keeping a figure nothing supports any more.
+#   - [[WFC-1146-integrate-umami]] 2S (3h)
 #
-# The journal says what was planned; this is the half that says what happened.
-# Nothing here writes markers - that belongs to focus.sh.
+# One-way and machine-owned. The block is replaced whole on every run, so a
+# corrected or deleted interval is reflected simply by running this again, and
+# nothing hand-written survives there - intent belongs in "# Plan".
 #
-# Usage: render_work_actuals.sh [YYYY-MM-DD] [--dry-run]
+# Entries are ordered by when the work started, so the block reads as the day did.
+#
+# Usage: render_work_actuals.sh [YYYY-MM-DD] [--dry-run] [--work-file <path>]
 
 set -uo pipefail
 
@@ -37,15 +37,12 @@ if [[ ! "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
 fi
 next_day=$(date -j -v+1d -f '%Y-%m-%d' "$day" '+%Y-%m-%d')
 
-# Annotating several tasks means several edits, so they are applied to one
-# working copy and diffed together. A caller mid-sequence passes its own copy
-# and diffs when its whole change is assembled.
-block_opts=""
+block_opts="--block Work --date $day"
 if [[ -n "$work_file" ]]; then
-    block_opts="--work-file $work_file"
+    block_opts="$block_opts --work-file $work_file"
 elif $dry_run; then
     work_file=$(mktemp -u "${TMPDIR:-/tmp}/render-actuals.XXXXXX")
-    block_opts="--work-file $work_file"
+    block_opts="$block_opts --work-file $work_file"
     owns_copy=true
     trap '[[ -n "$work_file" ]] && rm -f "$work_file"' EXIT
 fi
@@ -73,61 +70,47 @@ per_key=$(
 
         map({
             key: key,
+            start: .start,
             seconds: (((.end // (now | strftime("%Y%m%dT%H%M%SZ"))) | stamp) - (.start | stamp))
         })
         | group_by(.key)
-        | map({ key: .[0].key, sessions: length, seconds: (map(.seconds) | add) })
+        | map({
+              key:      .[0].key,
+              sessions: length,
+              seconds:  (map(.seconds) | add),
+              start:    (map(.start) | min)
+          })
+        | sort_by(.start)
         | .[] | [(.key // "-"), .sessions, .seconds] | @tsv
     '
 )
 
-# A day with no intervals is not an early exit: its entries still have to lose
-# any annotation they carry, which is the whole point of rendering from the
-# store rather than adding to what is already written.
-[[ -z "$per_key" ]] && echo "No intervals recorded on $day" >&2
-
-# What Timewarrior says, as key -> annotation. This is the whole truth for the
-# day: anything absent from it has no time recorded against it.
-actuals=$(mktemp) || exit 1
-seen=$(mktemp) || exit 1
-trap 'rm -f "$actuals" "$seen"; $owns_copy && rm -f "$work_file"' EXIT
-
+# Built as whole lines, since the block is replaced rather than patched.
+lines=()
 while IFS=$'\t' read -r key sessions seconds; do
     [[ -z "$key" ]] && continue
 
-    # Intervals tagged with nothing task-shaped cannot be placed in the journal.
-    # Reported rather than dropped, so a missing annotation is never a mystery.
+    # Intervals tagged with nothing task-shaped have no entry to belong to.
+    # Reported rather than dropped, so a missing line is never a mystery.
     if [[ "$key" == "-" ]]; then
         echo "Skipped $sessions interval(s) on $day carrying no task key" >&2
         continue
     fi
 
-    printf '%s\t%sS (%s)\n' "$key" "$sessions" "$(format_duration "$seconds")" >> "$actuals"
+    page="$key"
+    if page_path=$("$SCRIPT_DIR/find_task_page.sh" "$key" 2>/dev/null); then
+        page=$(basename "$page_path" .md)
+    fi
+
+    annotation="${sessions}S ($(format_duration "$seconds"))"
+    lines+=("[[$page]] $annotation")
+    echo "$key: $annotation"
 done <<< "$per_key"
 
-# Every entry naming a task is rewritten from that truth, so one whose intervals
-# were deleted loses its annotation instead of keeping a figure nothing supports.
-while IFS= read -r key; do
-    [[ -z "$key" ]] && continue
-    annotation=$(awk -F'\t' -v k="$key" '$1 == k { print $2; exit }' "$actuals")
-    "$BLOCK" annotate "$key" "$annotation" --date "$day" $block_opts
-    printf '%s\n' "$key" >> "$seen"
-    if [[ -n "$annotation" ]]; then
-        echo "$key: $annotation"
-    else
-        echo "$key: no time recorded"
-    fi
-done < <("$BLOCK" list --date "$day" $block_opts | awk -F'\t' '$2 != "" { print $2 }')
+if [[ ${#lines[@]} -eq 0 ]]; then
+    echo "No intervals recorded on $day - the Work block will be empty" >&2
+fi
 
-# Time logged for something the day never planned means focus was bypassed.
-# Record it unmarked - it happened, it just was not planned - rather than
-# letting the record quietly omit real work.
-while IFS=$'\t' read -r key annotation; do
-    [[ -z "$key" ]] && continue
-    grep -qx "$key" "$seen" 2>/dev/null && continue
-    "$BLOCK" set-marker "$key" - --date "$day" $block_opts
-    "$BLOCK" annotate "$key" "$annotation" --date "$day" $block_opts
-    echo "$key: $annotation (unplanned)"
-done < "$actuals"
+"$BLOCK" replace $block_opts ${lines[@]+"${lines[@]}"}
 
-$owns_copy && "$BLOCK" diff --date "$day" $block_opts
+$owns_copy && "$BLOCK" diff --date "$day" --work-file "$work_file"

@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
 #
-# Reads and writes the "# Work" block of a day's Logseq journal. This is the
-# only script that edits journal text, so the block's shape is defined in one
-# place rather than in every caller that wants to move a marker.
+# Reads and writes one heading block of a day's Logseq journal. This is the only
+# script that edits journal text, so a block's shape is defined in one place
+# rather than in every caller that wants to move a marker.
+#
+# A journal holds two of them, and they flow in opposite directions:
+#
+#   # Plan   hand-authored, the day's queue - LATER / NOW / DONE per entry.
+#            focus.sh moves the markers; anything else here is left alone.
+#   # Work   the day's record, rendered from Timewarrior. Machine-owned:
+#            render_work_actuals.sh replaces it wholesale.
 #
 # Entries are addressed by task key - the ID prefix of the [[page]] link they
 # carry. Plain-text entries have no key: they are listed, never touched.
 #
 # Usage:
-#   journal_work_block.sh list                                 [--date D]
-#   journal_work_block.sh set-marker <key> <LATER|NOW|DONE|->   [--date D]
-#   journal_work_block.sh annotate   <key> <text>               [--date D]
-#   journal_work_block.sh add        <text>                     [--date D]
-#   journal_work_block.sh remove     <key-or-exact-text>        [--date D]
-#   journal_work_block.sh strip-markers                         [--date D]
-#   journal_work_block.sh demote-now                            [--date D]
+#   journal_work_block.sh list                                 [--block B] [--date D]
+#   journal_work_block.sh set-marker <key> <LATER|NOW|DONE|->   [--block B] [--date D]
+#   journal_work_block.sh annotate   <key> <text>               [--block B] [--date D]
+#   journal_work_block.sh add        <text>                     [--block B] [--date D]
+#   journal_work_block.sh remove     <key-or-exact-text>        [--block B] [--date D]
+#   journal_work_block.sh replace    <line>...                  [--block B] [--date D]
+#   journal_work_block.sh strip-markers                         [--block B] [--date D]
+#   journal_work_block.sh demote-now                            [--block B] [--date D]
 #   journal_work_block.sh diff                                  [--date D]
 #
-# --date defaults to today. list prints TSV: marker, key, annotation, text.
+# --block defaults to Plan, which is the one with states to move. --date
+# defaults to today. list prints TSV: marker, key, annotation, text.
 #
 # Dry runs work by applying the real edits to a working copy and diffing it
 # against the journal, so what is shown is what would happen - not a guess.
@@ -39,16 +48,23 @@ shift || true
 
 date_arg=""
 work_file=""
+block="Plan"
 dry_run=false
 args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --date)      date_arg="${2:-}"; shift 2 ;;
+        --block)     block="${2:-}"; shift 2 ;;
         --work-file) work_file="${2:-}"; shift 2 ;;
         --dry-run)   dry_run=true; shift ;;
         *)           args+=("$1"); shift ;;
     esac
 done
+
+if [[ -z "$block" ]]; then
+    echo "Error: --block needs a heading name, e.g. Plan or Work" >&2
+    exit 1
+fi
 
 day="${date_arg:-$(date '+%Y-%m-%d')}"
 if [[ ! "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -115,12 +131,16 @@ show_diff() {
     diff -u --label "$journal" --label "$journal (would become)" "$from" "$1" || true
 }
 
-# Shared vocabulary for the awk programs below. The "# Work" heading sits at
-# column 0 and loses its bullet when it is the file's first block; the block
-# runs until the next line at column 0. Entries are its immediate "\t- "
-# children - anything deeper belongs to an entry and is passed through.
+# Shared vocabulary for the awk programs below. A block's heading sits at column
+# 0 and loses its bullet when it is the file's first block; the block runs until
+# the next line at column 0. Entries are its immediate "\t- " children -
+# anything deeper belongs to an entry and is passed through.
 read -r -d '' AWK_PRELUDE <<'PRELUDE'
-function is_work_heading(l) { return l ~ /^-?[[:space:]]*# Work[[:space:]]*$/ }
+function is_heading(l) {
+    sub(/^-[[:space:]]*/, "", l)
+    sub(/[[:space:]]+$/, "", l)
+    return l == "# " BLOCK
+}
 function is_top_level(l)    { return l ~ /^[^[:space:]]/ }
 function is_entry(l)        { return l ~ /^\t- / }
 
@@ -150,7 +170,7 @@ transform() {
 
     local updated
     updated=$(mktemp) || return 1
-    if ! awk "$@" "$AWK_PRELUDE
+    if ! awk -v BLOCK="$block" "$@" "$AWK_PRELUDE
 $program" "$target" > "$updated"; then
         rm -f "$updated"
         return 1
@@ -175,8 +195,8 @@ case "$verb" in
         [[ -f "$target" ]] && source_file="$target"
         [[ -f "$source_file" ]] || exit 0
 
-        awk "$AWK_PRELUDE"'
-            is_work_heading($0)        { inblock = 1; next }
+        awk -v BLOCK="$block" "$AWK_PRELUDE"'
+            is_heading($0)        { inblock = 1; next }
             inblock && is_top_level($0) { inblock = 0 }
             inblock && is_entry($0) {
                 text = $0
@@ -227,7 +247,7 @@ case "$verb" in
             function new_entry() {
                 return "\t- " (marker == "-" ? "" : marker " ") "[[" page "]]"
             }
-            is_work_heading($0) { inblock = 1; print; next }
+            is_heading($0) { inblock = 1; print; next }
             inblock && is_top_level($0) {
                 if (!seen) { print new_entry(); seen = 1 }
                 inblock = 0
@@ -258,7 +278,7 @@ case "$verb" in
         # The annotation replaces whatever trails the link, so re-running it
         # after a corrected Timewarrior interval overwrites rather than appends.
         transform '
-            is_work_heading($0)        { inblock = 1; print; next }
+            is_heading($0)        { inblock = 1; print; next }
             inblock && is_top_level($0) { inblock = 0 }
             inblock && is_entry($0) && entry_for_key($0, key) {
                 if (match($0, /\[\[[^]]+\]\]/)) {
@@ -280,7 +300,7 @@ case "$verb" in
         # Verbatim, marker included if the caller wrote one - this is how an
         # entry with no [[page]] to look up gets carried from one day to another.
         transform '
-            is_work_heading($0) { inblock = 1; print; next }
+            is_heading($0) { inblock = 1; print; next }
             inblock && is_top_level($0) {
                 if (!added) { print "\t- " text; added = 1 }
                 inblock = 0
@@ -290,6 +310,40 @@ case "$verb" in
         ' -v text="$text"
         ;;
 
+    replace)
+        # A projected block is written whole rather than patched: every existing
+        # entry goes and the given lines take their place. With no lines the
+        # block is emptied, which is the honest rendering of a day with no data.
+        # Joined on a unit separator rather than newlines: awk's -v cannot carry
+        # a newline, and a journal entry is a single line anyway.
+        us=$'\x1f'
+        lines=""
+        for line in ${args[@]+"${args[@]}"}; do
+            [[ -n "$lines" ]] && lines+="$us"
+            lines+="$line"
+        done
+
+        transform '
+            function emit(   n, i, a) {
+                if (lines == "") return
+                n = split(lines, a, SEP)
+                for (i = 1; i <= n; i++) print "\t- " a[i]
+            }
+            is_heading($0) { inblock = 1; print; next }
+            inblock && is_top_level($0) {
+                if (!written) { emit(); written = 1 }
+                inblock = 0
+            }
+            inblock && is_entry($0) { skip = 1; next }
+            inblock && skip {
+                if (is_entry($0) || is_top_level($0)) skip = 0
+                else next
+            }
+            { print }
+            END { if (inblock && !written) emit() }
+        ' -v lines="$lines" -v SEP="$us"
+        ;;
+
     strip-markers)
         # Sealing a day turns its queue into a record, and a record has no
         # states. Every entry loses its marker, plain-text ones included, which
@@ -297,7 +351,7 @@ case "$verb" in
         have_block || exit 0
 
         transform '
-            is_work_heading($0)        { inblock = 1; print; next }
+            is_heading($0)        { inblock = 1; print; next }
             inblock && is_top_level($0) { inblock = 0 }
             inblock && is_entry($0) {
                 sub(/^\t- (LATER|NOW|DONE) /, "\t- ")
@@ -323,7 +377,7 @@ case "$verb" in
                 sub(/^(LATER|NOW|DONE) /, "", l)
                 return l
             }
-            is_work_heading($0) { inblock = 1; print; next }
+            is_heading($0) { inblock = 1; print; next }
             inblock && is_top_level($0) { inblock = 0 }
             inblock && is_entry($0) && (entry_for_key($0, key) || entry_text($0) == key) { skip = 1; next }
             inblock && skip {
@@ -341,7 +395,7 @@ case "$verb" in
         # Only one thing is in progress at a time, so starting a task stands
         # down whatever else still claims NOW.
         transform '
-            is_work_heading($0)        { inblock = 1; print; next }
+            is_heading($0)        { inblock = 1; print; next }
             inblock && is_top_level($0) { inblock = 0 }
             inblock && is_entry($0) && marker_of($0) == "NOW" {
                 sub(/^\t- NOW /, "\t- LATER ")
@@ -351,7 +405,7 @@ case "$verb" in
         ;;
 
     *)
-        echo "Usage: $(basename "$0") list|set-marker|annotate|add|remove|strip-markers|demote-now|diff [...]" >&2
+        echo "Usage: $(basename "$0") list|set-marker|annotate|add|remove|replace|strip-markers|demote-now|diff [...]" >&2
         exit 1
         ;;
 esac
