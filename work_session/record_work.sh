@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 #
-# focus - one gesture for "I am working on X".
+# record_work - one gesture for "I am working on X".
 #
 # Four systems each hold a piece of that fact: the journal holds what was
 # planned, Taskwarrior which task is active, Timewarrior the interval, tmux the
 # session. Moved by hand they drift, so this moves them together.
 #
+# Takes a key and never asks a question; selection lives in work.sh.
+#
 # Usage:
-#   focus.sh start [<task-key>] [--dry-run]   pick when no key is given
-#   focus.sh stop  [--later|--done] [--dry-run]
-#   focus.sh status
+#   record_work.sh start <task-key> [--dry-run]
+#   record_work.sh stop  [--later|--done] [--dry-run]
+#   record_work.sh status
 #
 # stop closes the interval either way; --later and --done differ only in the
 # marker left in today's journal. Both mean "for today" - neither completes the
@@ -49,7 +51,7 @@ done
 block_opts=""
 work_file=""
 if $dry_run; then
-    work_file=$(mktemp -u "${TMPDIR:-/tmp}/focus-journal.XXXXXX")
+    work_file=$(mktemp -u "${TMPDIR:-/tmp}/work-journal.XXXXXX")
     block_opts="--work-file $work_file"
     trap '[[ -n "$work_file" ]] && rm -f "$work_file"' EXIT
 fi
@@ -83,7 +85,7 @@ case "$verb" in
     start)
         if [[ -z "$key" ]]; then
             echo "Usage: $(basename "$0") start <task-key>" >&2
-            echo "  to pick one: fcs.sh" >&2
+            echo "  to pick one: work start" >&2
             exit 1
         fi
 
@@ -184,10 +186,10 @@ case "$verb" in
         fi
 
         if [[ -z "$key" ]]; then
-            echo "focus: nothing active"
+            echo "work: nothing active"
         else
             elapsed=$(timew get dom.active.duration 2>/dev/null || true)
-            printf 'focus: %s%s\n' "$key" "${elapsed:+ (${elapsed})}"
+            printf 'work: %s%s\n' "$key" "${elapsed:+ (${elapsed})}"
             if [[ -n "$now_keys" ]]; then
                 printf '  journal: NOW\n'
             else
@@ -204,7 +206,7 @@ case "$verb" in
 
         if [[ -n "$drift" ]]; then
             echo "Error: $drift" >&2
-            echo "  focus.sh stop clears the marker, or set it by hand" >&2
+            echo "  work stop clears the marker, or set it by hand" >&2
             exit 1
         fi
         ;;

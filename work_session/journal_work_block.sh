@@ -7,7 +7,7 @@
 # A journal holds two of them, and they flow in opposite directions:
 #
 #   # Plan   hand-authored, the day's queue - LATER / NOW / DONE per entry.
-#            focus.sh moves the markers; anything else here is left alone.
+#            record_work.sh moves the markers; anything else here is left alone.
 #   # Work   the day's record, rendered from Timewarrior. Machine-owned:
 #            render_work_actuals.sh replaces it wholesale.
 #
