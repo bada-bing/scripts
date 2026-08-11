@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 #
-# The command-line front door to record_work.sh. With no verb it picks a task and
-# starts working on it, which is the common case; anything else is handed
-# straight through.
+# work - the command-line front door to record_work.sh.
 #
-# Selection lives here rather than in record_work.sh, which takes a key and never
-# asks a question.
+# With no verb it reports the open interval, which is the question asked most
+# often. Starting is always said explicitly, so it reads as the opposite of
+# stopping and cannot happen by mistyping something else.
+#
+# Selection lives here rather than in record_work.sh, which takes a key and
+# never asks a question.
 #
 # Usage:
-#   fcs.sh [--dry-run]                 pick a task, then start it
-#   fcs.sh <task-key> [--dry-run]      start that one without the picker
-#   fcs.sh start <task-key> | stop [--later|--done] | status
+#   work.sh                              report the open interval
+#   work.sh start [<task-key>]           pick when no key is given
+#   work.sh stop [--later|--done]        close the interval, mark the journal
+#   work.sh render [<day>]               render a day's record again
 
 set -uo pipefail
 
@@ -19,28 +22,59 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 usage() {
     cat <<'USAGE'
 Usage:
-  fcs                         pick a task, then start working on it
-  fcs <task-key>              start that one, skipping the picker
-  fcs start <task-key>        the same, said explicitly
-  fcs stop [--later|--done]   close the interval and mark today's journal
-  fcs status                  active task, its journal marker, its session
+  work                        what is being recorded right now
+  work start                  pick something, then start recording it
+  work start <task-key>       start that one, skipping the picker
+  work stop [--later|--done]  close the interval and mark today's journal
+  work render [<day>]         render a day's record again from Timewarrior
 
 --dry-run works throughout: it applies nothing and prints what it would do.
 A verb is handed to record_work.sh unchanged.
 USAGE
 }
 
-case "${1:-}" in
-    -h|--help)         usage; exit 0 ;;
-    start|stop|status) exec "$SCRIPT_DIR/record_work.sh" "$@" ;;
-    ""|-*)             ;;  # nothing but flags: pick something
-    *)                 exec "$SCRIPT_DIR/record_work.sh" start "$@" ;;
+verb="${1:-}"
+
+case "$verb" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+
+    render)
+        shift
+        exec "$SCRIPT_DIR/render_work_actuals.sh" "$@"
+        ;;
+
+    stop|status)
+        exec "$SCRIPT_DIR/record_work.sh" "$@"
+        ;;
+
+    start)
+        shift
+        # A key among the arguments means there is nothing to ask.
+        for arg in "$@"; do
+            [[ "$arg" == -* ]] && continue
+            exec "$SCRIPT_DIR/record_work.sh" start "$@"
+        done
+
+        selection=$("$SCRIPT_DIR/select_work.sh" --tasks) || exit 1
+        [[ -z "$selection" ]] && exit 0
+
+        IFS=$'\t' read -r _ key <<< "$selection"
+        [[ -z "$key" ]] && exit 0
+
+        exec "$SCRIPT_DIR/record_work.sh" start "$key" "$@"
+        ;;
+
+    ""|-*)
+        # Nothing but flags: report, rather than guess at an action.
+        exec "$SCRIPT_DIR/record_work.sh" status "$@"
+        ;;
+
+    *)
+        echo "Error: unknown verb '$verb'" >&2
+        echo "  to start work on it: work start $verb" >&2
+        exit 1
+        ;;
 esac
-
-selection=$("$SCRIPT_DIR/select_work.sh" --tasks) || exit 1
-[[ -z "$selection" ]] && exit 0
-
-IFS=$'\t' read -r _ key <<< "$selection"
-[[ -z "$key" ]] && exit 0
-
-exec "$SCRIPT_DIR/record_work.sh" start "$key" "$@"
