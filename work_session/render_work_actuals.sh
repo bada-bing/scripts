@@ -37,6 +37,13 @@ if [[ ! "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
 fi
 next_day=$(date -j -v+1d -f '%Y-%m-%d' "$day" '+%Y-%m-%d')
 
+# The day's edges in epoch seconds. Timewarrior stores UTC and a journal day is
+# local, so these must be built from local midnight - reading them as UTC would
+# shift every figure by the offset, which looks like a rounding error rather
+# than a bug.
+day_start=$(date -j -f '%Y-%m-%d %H:%M:%S' "$day 00:00:00" '+%s')
+day_end=$(date -j -f '%Y-%m-%d %H:%M:%S' "$next_day 00:00:00" '+%s')
+
 block_opts="--block Work --date $day"
 if [[ -n "$work_file" ]]; then
     block_opts="$block_opts --work-file $work_file"
@@ -63,31 +70,48 @@ format_duration() {
 # Timewarrior stamps times as 20260809T103000Z, which is not ISO 8601 as jq
 # reads it, hence strptime rather than fromdateiso8601. An open interval is
 # measured up to now, so a running task still reports what it has accumulated.
+#
+# Timewarrior has no concept of a day and returns an interval whole for every day
+# it touches, so each one is clamped to the day being rendered - otherwise a
+# 22:00 to 02:00 interval would count four hours on both days. An interval
+# reaching past an edge is flagged, so the entry can say it continues.
 per_key=$(
-    timew export "$day" - "$next_day" 2>/dev/null | jq -r '
+    timew export "$day" - "$next_day" 2>/dev/null | jq -r \
+        --argjson ds "$day_start" --argjson de "$day_end" '
         def key: [.tags[] | select(test("^[A-Za-z0-9]+[-_][0-9]+$"))] | first;
         def stamp: strptime("%Y%m%dT%H%M%SZ") | mktime;
 
-        map({
-            key: key,
-            start: .start,
-            seconds: (((.end // (now | strftime("%Y%m%dT%H%M%SZ"))) | stamp) - (.start | stamp))
-        })
+        map(
+            (.start | stamp) as $s
+          | (if .end then (.end | stamp) else (now | floor) end) as $e
+          | {
+                key:     key,
+                start:   $s,
+                seconds: (([$e, $de] | min) - ([$s, $ds] | max)),
+                before:  ($s < $ds),
+                after:   ($e > $de)
+            }
+        )
+        # An interval ending exactly at midnight contributes nothing to the next
+        # day, and a phantom 0m entry there would be a lie about working.
+        | map(select(.seconds > 0))
         | group_by(.key)
         | map({
               key:      .[0].key,
               sessions: length,
               seconds:  (map(.seconds) | add),
-              start:    (map(.start) | min)
+              start:    (map(.start) | min),
+              before:   (map(.before) | any),
+              after:    (map(.after) | any)
           })
         | sort_by(.start)
-        | .[] | [(.key // "-"), .sessions, .seconds] | @tsv
+        | .[] | [(.key // "-"), .sessions, .seconds, .before, .after] | @tsv
     '
 )
 
 # Built as whole lines, since the block is replaced rather than patched.
 lines=()
-while IFS=$'\t' read -r key sessions seconds; do
+while IFS=$'\t' read -r key sessions seconds before after; do
     [[ -z "$key" ]] && continue
 
     # Intervals tagged with nothing task-shaped have no entry to belong to.
@@ -103,8 +127,19 @@ while IFS=$'\t' read -r key sessions seconds; do
     fi
 
     annotation="${sessions}S ($(format_duration "$seconds"))"
-    lines+=("[[$page]] $annotation")
-    echo "$key: $annotation"
+    line="[[$page]] $annotation"
+
+    # The arrows are for the reader: the figures are already right without them,
+    # but a clamped 10m entry reads as wrong unless it says it continued.
+    [[ "$before" == "true" ]] && line="→ $line"
+    [[ "$after"  == "true" ]] && line="$line →"
+
+    note=""
+    [[ "$before" == "true" ]] && note+=" (continued from the previous day)"
+    [[ "$after"  == "true" ]] && note+=" (continues into the next day)"
+
+    lines+=("$line")
+    echo "$key: $annotation$note"
 done <<< "$per_key"
 
 if [[ ${#lines[@]} -eq 0 ]]; then
