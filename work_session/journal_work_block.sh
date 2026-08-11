@@ -162,11 +162,23 @@ function entry_for_key(l, key,   at, rest) {
 }
 PRELUDE
 
+# True when the file's last byte is a newline. Command substitution strips
+# trailing newlines, so a final newline leaves nothing behind to test.
+ends_with_newline() {
+    [[ -s "$1" ]] && [[ -z "$(tail -c1 "$1")" ]]
+}
+
 # Applies an awk program to the target and writes the result back. Trailing
 # arguments are awk options.
 transform() {
     local program="$1"; shift
     ensure_target || return 1
+
+    # Logseq writes a journal with no trailing newline, and awk terminates every
+    # line it prints - so an edit would silently add one and every diff would
+    # carry "\ No newline at end of file". Whatever the file had is restored.
+    local had_newline=false
+    ends_with_newline "$target" && had_newline=true
 
     local updated
     updated=$(mktemp) || return 1
@@ -180,6 +192,10 @@ $program" "$target" > "$updated"; then
     # rather than a replacement and the file keeps its permissions.
     cat "$updated" > "$target"
     rm -f "$updated"
+
+    if ! $had_newline && ends_with_newline "$target"; then
+        truncate -s -1 "$target"
+    fi
 
     if $owns_copy; then
         show_diff "$target"
