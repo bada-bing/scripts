@@ -10,12 +10,12 @@
 #
 # Usage:
 #   record_work.sh start <task-key> [--dry-run]
-#   record_work.sh stop  [--later|--done] [--dry-run]
+#   record_work.sh stop  [--dry-run]
 #   record_work.sh status
 #
-# stop closes the interval either way; --later and --done differ only in the
-# marker left in today's journal. Both mean "for today" - neither completes the
-# Taskwarrior task, which stays a deliberate act of its own.
+# The journal's "# Plan" is a hint, authored by hand and only ever read. Nothing
+# here writes a marker into it, so a marker cannot fall out of step with the
+# record - the open interval is the only claim about what is being worked on.
 #
 # Resolving the task goes first, because it is the only step that can
 # legitimately refuse; a failure there leaves nothing written anywhere else.
@@ -23,43 +23,26 @@
 set -uo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-BLOCK="$SCRIPT_DIR/journal_work_block.sh"
 
 verb="${1:-}"
 shift || true
 
 dry_run=false
-outcome="LATER"
 key=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) dry_run=true ;;
-        --done)    outcome="DONE" ;;
-        --later)   outcome="LATER" ;;
         -*)        echo "Error: unknown option $1" >&2; exit 1 ;;
         *)         key="$1" ;;
     esac
     shift
 done
 
-# Announced on stderr, so a redirection on the real command cannot swallow it.
-# Only for commands with no dry run of their own; the scripts that take
-# --dry-run are called directly, so their diffs reach the terminal.
-# A dry run applies the journal edits to one working copy threaded through every
-# call, then diffs it once. Several edits therefore show as the single combined
-# change they would make, instead of each step diffed against the unedited file.
-block_opts=""
-work_file=""
-if $dry_run; then
-    work_file=$(mktemp -u "${TMPDIR:-/tmp}/work-journal.XXXXXX")
-    block_opts="--work-file $work_file"
-    trap '[[ -n "$work_file" ]] && rm -f "$work_file"' EXIT
-fi
-
-show_journal_diff() {
-    $dry_run || return 0
-    "$BLOCK" diff $block_opts
-}
+# The render is the only thing here that touches the journal, so it owns its own
+# dry run and prints its own diff. Nothing has to be threaded through a shared
+# working copy any more, which is what several journal edits used to need.
+render_opts=""
+$dry_run && render_opts="--dry-run"
 
 # Announced on stderr, so a redirection on the real command cannot swallow it.
 run() {
@@ -134,16 +117,6 @@ case "$verb" in
             exit 1
         fi
 
-        marker=$("$BLOCK" list | awk -F'\t' -v k="$key" '$2 == k { print $1; exit }')
-
-        # Calling it done for today was a decision; starting again would erase it
-        # silently. Clearing the marker is the way to change your mind.
-        if [[ "$marker" == "DONE" ]]; then
-            echo "Error: '$key' is DONE for today" >&2
-            echo "  to work on it again: $BLOCK set-marker $key LATER" >&2
-            exit 1
-        fi
-
         # Already recording it means the session is what is missing, so opening
         # the interval again is skipped rather than treated as an error.
         if [[ "$current" != "$key" ]]; then
@@ -155,16 +128,9 @@ case "$verb" in
             run timew start "${tags[@]}" :yes >/dev/null || exit 1
         fi
 
-        # Only stand down a NOW that belongs to something else - demoting this
-        # entry just to mark it again would write twice and, on a dry run, show
-        # the intermediate step without the correction that follows it.
-        [[ "$marker" == "NOW" ]] || "$BLOCK" demote-now $block_opts
-        "$BLOCK" set-marker "$key" NOW $block_opts
-
         # Bootstrapping is skipped entirely on a dry run - it would really
         # create the session, which is the opposite of dry.
         if $dry_run; then
-            show_journal_diff
             printf 'would: bootstrap and switch to session for %s\n' "$key" >&2
             exit 0
         fi
@@ -192,70 +158,33 @@ case "$verb" in
 
         # Closing the interval before rendering means the actuals include it.
         run timew stop :yes >/dev/null || exit 1
-        "$SCRIPT_DIR/render_work_actuals.sh" $block_opts
+        "$SCRIPT_DIR/render_work_actuals.sh" $render_opts
 
-        # --done means done for today, so it moves the journal marker and
-        # nothing else. Completing the task in Taskwarrior is a separate,
-        # deliberate act - the task is finished when its page says so, not
-        # because a day's work on it ended.
-        if [[ -n "$key" ]]; then
-            "$BLOCK" set-marker "$key" "$outcome" $block_opts
-        else
-            echo "The interval carried no identity, so no journal entry was marked" >&2
-        fi
-        show_journal_diff
+        # Stopping records that the work happened and nothing more. Whether it is
+        # finished is a separate, deliberate act, in Taskwarrior and on its page.
+        [[ -n "$key" ]] || echo "The interval carried no identity" >&2
         ;;
 
     status)
-        # NOW means "running right now", so exactly one entry may carry it and
-        # only while an interval is open. Anything else is drift, and drift that
-        # is not reported is drift that gets believed.
+        # Says only what nothing else can say: what is being recorded, and for how
+        # long. Where the session is, tmux already shows; what the journal thinks,
+        # the journal no longer thinks anything about.
         interval=$(active_interval || true)
         key=$(active_key)
-        now_keys=$("$BLOCK" list | awk -F'\t' '$1 == "NOW" { print $2 }')
-        now_count=$(printf '%s' "$now_keys" | grep -c . || true)
-
-        drift=""
-        if [[ "$now_count" -gt 1 ]]; then
-            drift="$now_count entries are NOW: $(printf '%s' "$now_keys" | tr '\n' ' ')"
-        elif [[ -n "$key" && "$now_keys" != "$key" ]]; then
-            drift="'$key' is being recorded but the journal's NOW is '${now_keys:-none}'"
-        elif [[ -z "$key" && -n "$now_keys" ]]; then
-            drift="the journal says NOW '$now_keys' but nothing is being recorded"
-        fi
+        elapsed=$(timew get dom.active.duration 2>/dev/null || true)
 
         if [[ -z "$interval" ]]; then
             echo "work: nothing active"
         elif [[ -z "$key" ]]; then
-            elapsed=$(timew get dom.active.duration 2>/dev/null || true)
             printf 'work: an interval with no identity%s\n' "${elapsed:+ (${elapsed})}"
             printf '  tags: %s\n' "$(printf '%s' "$interval" | jq -r '.tags // [] | join(", ")')"
         else
-            elapsed=$(timew get dom.active.duration 2>/dev/null || true)
             printf 'work: %s%s\n' "$key" "${elapsed:+ (${elapsed})}"
-            if [[ -n "$now_keys" ]]; then
-                printf '  journal: NOW\n'
-            else
-                printf '  journal: no NOW entry today\n'
-            fi
-
-            session=$(printf '%s' "$key" | tr '.:' '--')
-            if tmux has-session -t="$session" 2>/dev/null; then
-                printf '  session: %s\n' "$session"
-            else
-                printf '  session: none\n'
-            fi
-        fi
-
-        if [[ -n "$drift" ]]; then
-            echo "Error: $drift" >&2
-            echo "  work stop clears the marker, or set it by hand" >&2
-            exit 1
         fi
         ;;
 
     *)
-        echo "Usage: $(basename "$0") start <task-key> | stop [--later|--done] | status" >&2
+        echo "Usage: $(basename "$0") start <task-key> | stop | status" >&2
         exit 1
         ;;
 esac

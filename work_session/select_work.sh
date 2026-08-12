@@ -4,8 +4,9 @@
 # Both kinds live in one list, because narrowing to the wrong kind first is how
 # you miss the thing you wanted.
 #
-# Tasks carry today's journal marker and the ones planned for today sort first,
-# so the list opens on the day's queue without hiding everything else.
+# Tasks named in today's hint sort first, so the list opens on what the day was
+# planned around without hiding everything else. The hint carries no state - being
+# named in it is the whole of what it says.
 #
 # Prints the selection as two tab-separated fields, "task <key>" or
 # "repo <path>", and nothing at all when the picker is dismissed.
@@ -22,31 +23,23 @@ LOGSEQ_GRAPH_PATH="${LOGSEQ_GRAPH_PATH:-$HOME/Documents/Logseq/KB}"
 tasks_only=false
 [[ "${1:-}" == "--tasks" ]] && tasks_only=true
 
-# Rank orders the list: what is queued for today first, then what is running,
-# then everything unplanned, and finally what today is already finished with.
-rank_of() {
-    case "$1" in
-        LATER) echo 0 ;;
-        NOW)   echo 1 ;;
-        "")    echo 2 ;;
-        DONE)  echo 3 ;;
-        *)     echo 2 ;;
-    esac
-}
-
 tasks() {
     local planned
     planned=$(mktemp) || return 1
     "$SCRIPT_DIR/journal_work_block.sh" list 2>/dev/null \
-        | awk -F'\t' '$2 != "" { print $2 "\t" $1 }' > "$planned"
+        | awk -F'\t' '$2 != "" { print $2 }' > "$planned"
 
     task status:pending export 2>/dev/null \
         | jq -r 'sort_by(-.urgency) | .[] | [.description, (.project // "-")] | @tsv' \
         | while IFS=$'\t' read -r key project; do
             page=$(basename "$(ls "$LOGSEQ_GRAPH_PATH/pages/$key"-*.md 2>/dev/null | head -1)" .md 2>/dev/null)
-            marker=$(awk -F'\t' -v k="$key" '$1 == k { print $2; exit }' "$planned")
+            if grep -qxF "$key" "$planned" 2>/dev/null; then
+                rank=0; hint="hint"
+            else
+                rank=1; hint="-"
+            fi
             printf '%s\ttask\t%s\t%s\t%s\t%s\n' \
-                "$(rank_of "$marker")" "${marker:--}" "$key" "$project" "${page#"$key"-}"
+                "$rank" "$hint" "$key" "$project" "${page#"$key"-}"
         done
     rm -f "$planned"
 }
@@ -56,7 +49,7 @@ repos() {
     IFS=':' read -ra roots <<< "${SRC_PATH:-$HOME/Developer/src}"
     find "${roots[@]}" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort \
         | while read -r path; do
-            printf '4\trepo\t%s\t%s\t%s\t%s\n' "-" "$(basename "$path")" "" "$path"
+            printf '2\trepo\t%s\t%s\t%s\t%s\n' "-" "$(basename "$path")" "" "$path"
         done
 }
 
@@ -70,7 +63,7 @@ selection=$(
 
 [[ -z "$selection" ]] && exit 0
 
-# Kind is field 1 and the marker field 2, so a task key is field 3; a
+# Kind is field 1 and the hint flag field 2, so a task key is field 3; a
 # repository's path is the last field, which survives its project column being
 # empty. Neither may contain whitespace, which holds for keys and source roots.
 kind=$(awk '{print $1}' <<< "$selection")

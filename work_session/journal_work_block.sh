@@ -2,12 +2,12 @@
 #
 # Reads and writes one heading block of a day's Logseq journal. This is the only
 # script that edits journal text, so a block's shape is defined in one place
-# rather than in every caller that wants to move a marker.
+# rather than in every caller that wants to read or replace one.
 #
 # A journal holds two of them, and they flow in opposite directions:
 #
-#   # Plan   hand-authored, the day's queue - LATER / NOW / DONE per entry.
-#            record_work.sh moves the markers; anything else here is left alone.
+#   # Plan   hand-authored, the day's hint. It carries no state: being named in
+#            it is the whole of what it says. Read by the tooling, never written.
 #   # Work   the day's record, rendered from Timewarrior. Machine-owned:
 #            render_work_actuals.sh replaces it wholesale.
 #
@@ -15,18 +15,16 @@
 # carry. Plain-text entries have no key: they are listed, never touched.
 #
 # Usage:
-#   journal_work_block.sh list                                 [--block B] [--date D]
-#   journal_work_block.sh set-marker <key> <LATER|NOW|DONE|->   [--block B] [--date D]
-#   journal_work_block.sh annotate   <key> <text>               [--block B] [--date D]
-#   journal_work_block.sh add        <text>                     [--block B] [--date D]
-#   journal_work_block.sh remove     <key-or-exact-text>        [--block B] [--date D]
-#   journal_work_block.sh replace    <line>...                  [--block B] [--date D]
-#   journal_work_block.sh strip-markers                         [--block B] [--date D]
-#   journal_work_block.sh demote-now                            [--block B] [--date D]
-#   journal_work_block.sh diff                                  [--date D]
+#   journal_work_block.sh list                            [--block B] [--date D]
+#   journal_work_block.sh annotate <key> <text>            [--block B] [--date D]
+#   journal_work_block.sh add      <text>                  [--block B] [--date D]
+#   journal_work_block.sh remove   <key-or-exact-text>     [--block B] [--date D]
+#   journal_work_block.sh replace  <line>...               [--block B] [--date D]
+#   journal_work_block.sh diff                             [--date D]
 #
-# --block defaults to Plan, which is the one with states to move. --date
-# defaults to today. list prints TSV: marker, key, annotation, text.
+# --block defaults to Plan, the block a person edits. --date defaults to today.
+# list prints TSV: marker, key, annotation, text - the marker column is empty for
+# anything written since the hint stopped carrying state.
 #
 # Dry runs work by applying the real edits to a working copy and diffing it
 # against the journal, so what is shown is what would happen - not a guess.
@@ -240,47 +238,6 @@ case "$verb" in
         show_diff "$target"
         ;;
 
-    set-marker)
-        key="${args[0]:-}"
-        marker="${args[1]:-}"
-        if [[ -z "$key" || -z "$marker" ]]; then
-            echo "Usage: $(basename "$0") set-marker <key> <LATER|NOW|DONE|->" >&2
-            exit 1
-        fi
-        case "$marker" in
-            LATER|NOW|DONE|-) ;;
-            *) echo "Error: marker must be LATER, NOW, DONE or - (clear)" >&2; exit 1 ;;
-        esac
-
-        # Inserting a new entry needs the page's full name, which only the page
-        # itself knows; a key with no page is still recorded, under the key.
-        page="$key"
-        if page_path=$("$(cd "$(dirname "$0")" && pwd)/find_task_page.sh" "$key" 2>/dev/null); then
-            page=$(basename "$page_path" .md)
-        fi
-
-        transform '
-            function new_entry() {
-                return "\t- " (marker == "-" ? "" : marker " ") "[[" page "]]"
-            }
-            is_heading($0) { inblock = 1; print; next }
-            inblock && is_top_level($0) {
-                if (!seen) { print new_entry(); seen = 1 }
-                inblock = 0
-            }
-            inblock && is_entry($0) && entry_for_key($0, key) {
-                seen = 1
-                text = $0
-                sub(/^\t- /, "", text)
-                sub(/^(LATER|NOW|DONE) /, "", text)
-                print "\t- " (marker == "-" ? "" : marker " ") text
-                next
-            }
-            { print }
-            END { if (inblock && !seen) print new_entry() }
-        ' -v key="$key" -v marker="$marker" -v page="$page"
-        ;;
-
     annotate)
         key="${args[0]:-}"
         annot="${args[1]:-}"
@@ -360,22 +317,6 @@ case "$verb" in
         ' -v lines="$lines" -v SEP="$us"
         ;;
 
-    strip-markers)
-        # Sealing a day turns its queue into a record, and a record has no
-        # states. Every entry loses its marker, plain-text ones included, which
-        # is why this is one pass over the block rather than a call per entry.
-        have_block || exit 0
-
-        transform '
-            is_heading($0)        { inblock = 1; print; next }
-            inblock && is_top_level($0) { inblock = 0 }
-            inblock && is_entry($0) {
-                sub(/^\t- (LATER|NOW|DONE) /, "\t- ")
-            }
-            { print }
-        '
-        ;;
-
     remove)
         key="${args[0]:-}"
         if [[ -z "$key" ]]; then
@@ -404,24 +345,8 @@ case "$verb" in
         ' -v key="$key"
         ;;
 
-    demote-now)
-        # No journal means no NOW to stand down.
-        have_block || exit 0
-
-        # Only one thing is in progress at a time, so starting a task stands
-        # down whatever else still claims NOW.
-        transform '
-            is_heading($0)        { inblock = 1; print; next }
-            inblock && is_top_level($0) { inblock = 0 }
-            inblock && is_entry($0) && marker_of($0) == "NOW" {
-                sub(/^\t- NOW /, "\t- LATER ")
-            }
-            { print }
-        '
-        ;;
-
     *)
-        echo "Usage: $(basename "$0") list|set-marker|annotate|add|remove|replace|strip-markers|demote-now|diff [...]" >&2
+        X
         exit 1
         ;;
 esac

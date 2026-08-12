@@ -12,7 +12,7 @@
 # Usage:
 #   work.sh                              report the open interval
 #   work.sh start [<task-key>]           pick when no key is given
-#   work.sh stop [--later|--done]        close the interval, mark the journal
+#   work.sh stop                         close the interval, render the day
 #   work.sh render [<day>]               render a day's record again
 
 set -uo pipefail
@@ -25,7 +25,7 @@ Usage:
   work                        what is being recorded right now
   work start                  pick something, then start recording it
   work start <task-key>       start that one, skipping the picker
-  work stop [--later|--done]  close the interval and mark today's journal
+  work stop                   close the interval and render the day
   work render [<day>]         render a day's record again from Timewarrior
 
 --dry-run works throughout: it applies nothing and prints what it would do.
