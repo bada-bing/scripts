@@ -65,8 +65,11 @@ format_duration() {
     fi
 }
 
-# An interval carries the task key plus domain tags (client_wpsm, job, ...), so
-# the key is the tag shaped like one: letters or digits, a separator, a number.
+# The identity - what makes two intervals the same piece of work - is the tag
+# marked with a "%" prefix. A bare key is still accepted, matched by its shape:
+# letters or digits, a separator, a number. Intervals written before the prefix
+# existed carry that form, and they are not rewritten until the backfill.
+#
 # Timewarrior stamps times as 20260809T103000Z, which is not ISO 8601 as jq
 # reads it, hence strptime rather than fromdateiso8601. An open interval is
 # measured up to now, so a running task still reports what it has accumulated.
@@ -78,7 +81,11 @@ format_duration() {
 per_key=$(
     timew export "$day" - "$next_day" 2>/dev/null | jq -r \
         --argjson ds "$day_start" --argjson de "$day_end" '
-        def key: [.tags[] | select(test("^[A-Za-z0-9]+[-_][0-9]+$"))] | first;
+        def key:
+            ([.tags[] | select(startswith("%"))] | first) as $identity
+          | if $identity then ($identity | ltrimstr("%"))
+            else ([.tags[] | select(test("^[A-Za-z0-9]+[-_][0-9]+$"))] | first)
+            end;
         def stamp: strptime("%Y%m%dT%H%M%SZ") | mktime;
 
         map(
