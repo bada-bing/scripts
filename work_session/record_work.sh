@@ -2,9 +2,9 @@
 #
 # record_work - one gesture for "I am working on X".
 #
-# Four systems each hold a piece of that fact: the journal holds what was
-# planned, Taskwarrior which task is active, Timewarrior the interval, tmux the
-# session. Moved by hand they drift, so this moves them together.
+# Timewarrior is the record: the interval is the only place work is recorded, and
+# the journal, the session and this script all read from it. Taskwarrior holds
+# prospective work and is read for what a task is - never written.
 #
 # Takes a key and never asks a question; selection lives in work.sh.
 #
@@ -17,8 +17,8 @@
 # marker left in today's journal. Both mean "for today" - neither completes the
 # Taskwarrior task, which stays a deliberate act of its own.
 #
-# Taskwarrior goes first, because it is the only step that can legitimately
-# refuse; a failure there leaves nothing written anywhere else.
+# Resolving the task goes first, because it is the only step that can
+# legitimately refuse; a failure there leaves nothing written anywhere else.
 
 set -uo pipefail
 
@@ -71,14 +71,33 @@ run() {
 }
 
 # The Taskwarrior description IS the task key, so a task is addressed by its
-# exact description rather than by an id that renumbers.
-uuid_for_key() {
+# exact description rather than by an id that renumbers. Taskwarrior is read for
+# what a task is and never written: it holds prospective work, and the record of
+# what happened belongs to Timewarrior alone.
+task_for_key() {
     task status:pending export 2>/dev/null \
-        | jq -r --arg key "$1" 'map(select(.description == $key)) | .[0].uuid // empty'
+        | jq -r --arg key "$1" 'map(select(.description == $key)) | .[0] // empty'
 }
 
+# The interval's tags: the identity first, then the domain and whatever else the
+# task carries - the same set the Taskwarrior hook used to assemble.
+interval_tags_for() {
+    printf '%%%s\n' "$1"
+    printf '%s' "$2" | jq -r '[(.project // empty)] + (.tags // []) | .[]'
+}
+
+# Timewarrior's active state is the interval with no end, and at most one exists.
+# dom.active.json is an error rather than an empty answer when nothing is
+# running, so the flag is tested first.
+active_interval() {
+    [[ "$(timew get dom.active 2>/dev/null || true)" == "1" ]] || return 1
+    timew get dom.active.json 2>/dev/null
+}
+
+# One definition of the identity, shared with the status bar, so the two cannot
+# disagree about what is being recorded.
 active_key() {
-    task +ACTIVE export 2>/dev/null | jq -r 'sort_by(.id) | last | .description // empty'
+    "$SCRIPT_DIR/get_active_identity.sh"
 }
 
 case "$verb" in
@@ -89,14 +108,28 @@ case "$verb" in
             exit 1
         fi
 
-        current=$(active_key)
-        if [[ -n "$current" && "$current" != "$key" ]]; then
-            echo "Error: '$current' is already active - stop it first" >&2
-            exit 1
+        # Timewarrior would close whatever is open by itself, but silently - the
+        # journal marker and the day's record would be left behind, which is the
+        # drift this whole gesture exists to prevent. The test is whether *any*
+        # interval is open, not whether an identified one is: an interval started
+        # by hand has no identity and no journal entry, so closing it silently
+        # would lose the most.
+        current=""
+        if active_interval >/dev/null; then
+            current=$(active_key)
+            if [[ "$current" != "$key" ]]; then
+                if [[ -n "$current" ]]; then
+                    echo "Error: '$current' is already being recorded - stop it first" >&2
+                else
+                    echo "Error: an interval with no identity is already being recorded" >&2
+                    echo "  stop it first, or give it one: timew tag @1 %$key" >&2
+                fi
+                exit 1
+            fi
         fi
 
-        uuid=$(uuid_for_key "$key")
-        if [[ -z "$uuid" ]]; then
+        task_json=$(task_for_key "$key")
+        if [[ -z "$task_json" ]]; then
             echo "Error: no pending Taskwarrior task described '$key'" >&2
             exit 1
         fi
@@ -111,10 +144,15 @@ case "$verb" in
             exit 1
         fi
 
-        # Already active means the session is what is missing, so starting the
-        # task again is skipped rather than treated as an error.
+        # Already recording it means the session is what is missing, so opening
+        # the interval again is skipped rather than treated as an error.
         if [[ "$current" != "$key" ]]; then
-            run task "$uuid" start >/dev/null || exit 1
+            tags=()
+            while IFS= read -r tag; do
+                [[ -n "$tag" ]] && tags+=("$tag")
+            done < <(interval_tags_for "$key" "$task_json")
+
+            run timew start "${tags[@]}" :yes >/dev/null || exit 1
         fi
 
         # Only stand down a NOW that belongs to something else - demoting this
@@ -144,34 +182,35 @@ case "$verb" in
         ;;
 
     stop)
-        key=$(active_key)
-        if [[ -z "$key" ]]; then
-            echo "Nothing is active" >&2
+        # The open interval knows what it is, so nothing has to be remembered
+        # between starting and stopping.
+        if ! active_interval >/dev/null; then
+            echo "Nothing is being recorded" >&2
             exit 0
         fi
-
-        uuid=$(uuid_for_key "$key")
-        if [[ -z "$uuid" ]]; then
-            echo "Error: active task '$key' is not pending - resolve it by hand" >&2
-            exit 1
-        fi
+        key=$(active_key)
 
         # Closing the interval before rendering means the actuals include it.
-        run task "$uuid" stop >/dev/null || exit 1
+        run timew stop :yes >/dev/null || exit 1
         "$SCRIPT_DIR/render_work_actuals.sh" $block_opts
 
         # --done means done for today, so it moves the journal marker and
         # nothing else. Completing the task in Taskwarrior is a separate,
         # deliberate act - the task is finished when its page says so, not
         # because a day's work on it ended.
-        "$BLOCK" set-marker "$key" "$outcome" $block_opts
+        if [[ -n "$key" ]]; then
+            "$BLOCK" set-marker "$key" "$outcome" $block_opts
+        else
+            echo "The interval carried no identity, so no journal entry was marked" >&2
+        fi
         show_journal_diff
         ;;
 
     status)
         # NOW means "running right now", so exactly one entry may carry it and
-        # only while Taskwarrior agrees. Anything else is drift between the two,
-        # and drift that is not reported is drift that gets believed.
+        # only while an interval is open. Anything else is drift, and drift that
+        # is not reported is drift that gets believed.
+        interval=$(active_interval || true)
         key=$(active_key)
         now_keys=$("$BLOCK" list | awk -F'\t' '$1 == "NOW" { print $2 }')
         now_count=$(printf '%s' "$now_keys" | grep -c . || true)
@@ -180,13 +219,17 @@ case "$verb" in
         if [[ "$now_count" -gt 1 ]]; then
             drift="$now_count entries are NOW: $(printf '%s' "$now_keys" | tr '\n' ' ')"
         elif [[ -n "$key" && "$now_keys" != "$key" ]]; then
-            drift="Taskwarrior is running '$key' but the journal's NOW is '${now_keys:-none}'"
+            drift="'$key' is being recorded but the journal's NOW is '${now_keys:-none}'"
         elif [[ -z "$key" && -n "$now_keys" ]]; then
-            drift="the journal says NOW '$now_keys' but nothing is running"
+            drift="the journal says NOW '$now_keys' but nothing is being recorded"
         fi
 
-        if [[ -z "$key" ]]; then
+        if [[ -z "$interval" ]]; then
             echo "work: nothing active"
+        elif [[ -z "$key" ]]; then
+            elapsed=$(timew get dom.active.duration 2>/dev/null || true)
+            printf 'work: an interval with no identity%s\n' "${elapsed:+ (${elapsed})}"
+            printf '  tags: %s\n' "$(printf '%s' "$interval" | jq -r '.tags // [] | join(", ")')"
         else
             elapsed=$(timew get dom.active.duration 2>/dev/null || true)
             printf 'work: %s%s\n' "$key" "${elapsed:+ (${elapsed})}"
