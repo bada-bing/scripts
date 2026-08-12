@@ -58,7 +58,7 @@ fi
 
 # 1. Gather the components
 session_color=$($HOME/Developer/toolbox/scripts/tmux_statusbar/session_color.sh "$session_name" right)
-task_progress=$($HOME/Developer/toolbox/scripts/dev-env/get_active_task_progress.sh)
+task_progress=$($HOME/Developer/toolbox/scripts/tmux_statusbar/render_active_work.sh)
 timew_today=$($HOME/Developer/toolbox/scripts/tmux_statusbar/get_timew_today.sh)
 datetime=$(date '+%a, %b %e')
 hostname="[$(hostname -s)]"
