@@ -4,8 +4,10 @@
 # no interval is open.
 #
 # The identity is the tag marked with a "%" prefix - what makes two intervals the
-# same piece of work. A bare key is still accepted by its shape, since intervals
-# written before the prefix existed carry that form until the backfill.
+# same piece of work - and nothing else.
+#
+# The prefix is dropped by slicing rather than with ltrimstr, which raises on a
+# null input in jq 1.8.
 #
 # An interval with no identity prints nothing, which is deliberately the same
 # answer as no interval at all: a caller that needs to tell those apart reads
@@ -20,7 +22,5 @@ set -uo pipefail
 [[ "$(timew get dom.active 2>/dev/null || true)" == "1" ]] || exit 0
 
 timew get dom.active.json 2>/dev/null | jq -r '
-    ([.tags[]? | select(startswith("%"))] | first) as $identity
-  | if $identity then ($identity | ltrimstr("%"))
-    else ([.tags[]? | select(test("^[A-Za-z0-9]+[-_][0-9]+$"))] | first // empty)
-    end'
+    [.tags[]? | select(startswith("%"))] | first
+  | if . then .[1:] else empty end'

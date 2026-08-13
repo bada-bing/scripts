@@ -66,9 +66,12 @@ format_duration() {
 }
 
 # The identity - what makes two intervals the same piece of work - is the tag
-# marked with a "%" prefix. A bare key is still accepted, matched by its shape:
-# letters or digits, a separator, a number. Intervals written before the prefix
-# existed carry that form, and they are not rewritten until the backfill.
+# marked with a "%" prefix, and nothing else. An interval without one has no
+# identity and is reported rather than guessed at.
+#
+# The prefix is dropped by slicing rather than with ltrimstr, which raises on a
+# null input in jq 1.8 - so an interval with no identity would abort the whole
+# render instead of being skipped.
 #
 # Timewarrior stamps times as 20260809T103000Z, which is not ISO 8601 as jq
 # reads it, hence strptime rather than fromdateiso8601. An open interval is
@@ -82,10 +85,8 @@ per_key=$(
     timew export "$day" - "$next_day" 2>/dev/null | jq -r \
         --argjson ds "$day_start" --argjson de "$day_end" '
         def key:
-            ([.tags[] | select(startswith("%"))] | first) as $identity
-          | if $identity then ($identity | ltrimstr("%"))
-            else ([.tags[] | select(test("^[A-Za-z0-9]+[-_][0-9]+$"))] | first)
-            end;
+            [.tags[]? | select(startswith("%"))] | first
+          | if . then .[1:] else null end;
         def stamp: strptime("%Y%m%dT%H%M%SZ") | mktime;
 
         map(
