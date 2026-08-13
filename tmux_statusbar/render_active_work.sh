@@ -13,8 +13,10 @@ export PATH="$NODE_BIN_DIR:$PATH"
 
 script_dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-# 1. Get the identity of the interval being recorded
-IDENTITY=$("$script_dir/../work_session/get_active_identity.sh")
+# 1. What is being recorded, as "<kind>\t<identity>", or nothing at all.
+ACTIVE=$("$script_dir/../work_session/get_active_identity.sh")
+KIND=$(printf '%s' "$ACTIVE" | cut -f1)
+IDENTITY=$(printf '%s' "$ACTIVE" | cut -f2)
 
 # 2. Nothing being recorded, or something being recorded that cannot be named.
 #    The two must not read alike: an unlabelled interval accrues time, and a bar
@@ -28,7 +30,14 @@ if [ -z "$IDENTITY" ]; then
     exit 0
 fi
 
-# 3. We have an identity. This is our default output if no Logseq page is found.
+# 3. An adhoc has no page and no progress to read, so its label is the whole
+#    answer - and it is not called a task, because it is not one.
+if [ "$KIND" = "adhoc" ]; then
+    echo "$IDENTITY"
+    exit 0
+fi
+
+# 4. Task work. This is our default output if no Logseq page is found.
 FINAL_OUTPUT="Task $IDENTITY"
 
 # 4. Try to find the corresponding file in Logseq

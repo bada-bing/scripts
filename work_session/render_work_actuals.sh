@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 #
-# Renders a day's "# Work" block from Timewarrior - the day's record: one entry
-# per task worked on, with the number of sessions and the time they add up to.
+# Renders a day's "# Work" block from Timewarrior - the day's record: one entry per
+# piece of work, with the number of sessions and the time they add up to.
 #
 #   - [[WFC-1146-integrate-umami]] 2S (3h)
+#   - fixed the deployment pipeline 1S (40m)
+#
+# A linked entry is task work and a plain one is an adhoc, which is a consequence
+# of where each takes its label rather than a flag anyone has to maintain.
 #
 # One-way and machine-owned. The block is replaced whole on every run, so a
 # corrected or deleted interval is reflected simply by running this again, and
@@ -66,8 +70,9 @@ format_duration() {
 }
 
 # The identity - what makes two intervals the same piece of work - is the tag
-# marked with a "%" prefix, and nothing else. An interval without one has no
-# identity and is reported rather than guessed at.
+# marked with a "%" prefix for task work, and the annotation for an adhoc. So an
+# adhoc groups by its own text, and relabelling one sitting of three splits it into
+# its own entry. An interval with neither is reported rather than guessed at.
 #
 # The prefix is dropped by slicing rather than with ltrimstr, which raises on a
 # null input in jq 1.8 - so an interval with no identity would abort the whole
@@ -84,16 +89,21 @@ format_duration() {
 per_key=$(
     timew export "$day" - "$next_day" 2>/dev/null | jq -r \
         --argjson ds "$day_start" --argjson de "$day_end" '
-        def key:
-            [.tags[]? | select(startswith("%"))] | first
-          | if . then .[1:] else null end;
+        def identity:
+            ([.tags[]? | select(startswith("%"))] | first) as $tag
+          | if $tag then { kind: "task", id: ($tag | .[1:]) }
+            elif (.annotation // "") != "" then { kind: "adhoc", id: .annotation }
+            else { kind: "-", id: "-" }
+            end;
         def stamp: strptime("%Y%m%dT%H%M%SZ") | mktime;
 
         map(
             (.start | stamp) as $s
           | (if .end then (.end | stamp) else (now | floor) end) as $e
+          | identity as $i
           | {
-                key:     key,
+                kind:    $i.kind,
+                id:      $i.id,
                 start:   $s,
                 seconds: (([$e, $de] | min) - ([$s, $ds] | max)),
                 before:  ($s < $ds),
@@ -103,9 +113,10 @@ per_key=$(
         # An interval ending exactly at midnight contributes nothing to the next
         # day, and a phantom 0m entry there would be a lie about working.
         | map(select(.seconds > 0))
-        | group_by(.key)
+        | group_by([.kind, .id])
         | map({
-              key:      .[0].key,
+              kind:     .[0].kind,
+              id:       .[0].id,
               sessions: length,
               seconds:  (map(.seconds) | add),
               start:    (map(.start) | min),
@@ -113,29 +124,38 @@ per_key=$(
               after:    (map(.after) | any)
           })
         | sort_by(.start)
-        | .[] | [(.key // "-"), .sessions, .seconds, .before, .after] | @tsv
+        | .[] | [.kind, .id, .sessions, .seconds, .before, .after] | @tsv
     '
 )
 
 # Built as whole lines, since the block is replaced rather than patched.
 lines=()
-while IFS=$'\t' read -r key sessions seconds before after; do
-    [[ -z "$key" ]] && continue
+while IFS=$'\t' read -r kind id sessions seconds before after; do
+    [[ -z "$kind" ]] && continue
 
-    # Intervals tagged with nothing task-shaped have no entry to belong to.
-    # Reported rather than dropped, so a missing line is never a mystery.
-    if [[ "$key" == "-" ]]; then
-        echo "Skipped $sessions interval(s) on $day carrying no task key" >&2
+    # An interval with neither a % tag nor an annotation names no work, so there is
+    # no entry it could belong to. Reported rather than dropped, so a missing line
+    # is never a mystery.
+    if [[ "$kind" == "-" ]]; then
+        echo "Skipped $sessions interval(s) on $day with no identity" >&2
         continue
     fi
 
-    page="$key"
-    if page_path=$("$SCRIPT_DIR/find_task_page.sh" "$key" 2>/dev/null); then
-        page=$(basename "$page_path" .md)
+    # A task resolves its page, so renaming the page relabels the record. An adhoc
+    # has no page: its annotation is the label, written as plain text, which is
+    # what tells the two apart when reading the block.
+    if [[ "$kind" == "task" ]]; then
+        page="$id"
+        if page_path=$("$SCRIPT_DIR/find_task_page.sh" "$id" 2>/dev/null); then
+            page=$(basename "$page_path" .md)
+        fi
+        entry="[[$page]]"
+    else
+        entry="$id"
     fi
 
     annotation="${sessions}S ($(format_duration "$seconds"))"
-    line="[[$page]] $annotation"
+    line="$entry $annotation"
 
     # The arrows are for the reader: the figures are already right without them,
     # but a clamped 10m entry reads as wrong unless it says it continued.
@@ -147,7 +167,7 @@ while IFS=$'\t' read -r key sessions seconds before after; do
     [[ "$after"  == "true" ]] && note+=" (continues into the next day)"
 
     lines+=("$line")
-    echo "$key: $annotation$note"
+    echo "$id: $annotation$note"
 done <<< "$per_key"
 
 if [[ ${#lines[@]} -eq 0 ]]; then

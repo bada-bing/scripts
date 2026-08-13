@@ -29,14 +29,22 @@ shift || true
 
 dry_run=false
 key=""
+words=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) dry_run=true ;;
         -*)        echo "Error: unknown option $1" >&2; exit 1 ;;
-        *)         key="$1" ;;
+        *)         key="$1"; words=$((words + 1)) ;;
     esac
     shift
 done
+
+# An adhoc's label is one argument. Several means it went unquoted, and taking the
+# last word silently would record work under a name that says nothing.
+if [[ "$words" -gt 1 ]]; then
+    echo "Error: expected one argument - a task key, or a label in quotes" >&2
+    exit 1
+fi
 
 # The render is the only thing here that touches the journal, so it owns its own
 # dry run and prints its own diff. Nothing has to be threaded through a shared
@@ -78,9 +86,22 @@ active_interval() {
 }
 
 # One definition of the identity, shared with the status bar, so the two cannot
-# disagree about what is being recorded.
-active_key() {
+# disagree about what is being recorded. Prints "<kind>\t<identity>", or nothing.
+active_identity() {
     "$SCRIPT_DIR/get_active_identity.sh"
+}
+
+# Just the identity, for a message that only needs to name what is running.
+active_label() {
+    active_identity | cut -f2
+}
+
+# A key-shaped argument was meant as a task, so failing to resolve it is an error
+# rather than a licence to record an adhoc called "CHARLIE_99". A Logseq page with
+# that prefix says the same thing. Anything else is prose, and prose is a label.
+looks_like_a_key() {
+    [[ "$1" =~ ^[A-Za-z0-9]+[-_.][A-Za-z0-9]*[0-9]+$ ]] \
+        || "$SCRIPT_DIR/find_task_page.sh" "$1" >/dev/null 2>&1
 }
 
 case "$verb" in
@@ -99,24 +120,48 @@ case "$verb" in
         # This means start is never a way to reach a session. Navigation belongs
         # to the sessionizer, which touches no time at all.
         if active_interval >/dev/null; then
-            current=$(active_key)
+            IFS=$'\t' read -r current_kind current <<< "$(active_identity)"
             elapsed=$(timew get dom.active.duration 2>/dev/null || true)
-            if [[ -n "$current" ]]; then
+            if [[ -n "${current:-}" ]]; then
                 printf "Error: '%s' is already being recorded%s - stop it first\n" \
                     "$current" "${elapsed:+ (${elapsed})}" >&2
-                echo "  to reach its session without touching the record: tn" >&2
+                # An adhoc has no session to be pointed at.
+                [[ "${current_kind:-}" == "task" ]] \
+                    && echo "  to reach its session without touching the record: tn" >&2
             else
                 printf 'Error: an interval with no identity is already being recorded%s\n' \
                     "${elapsed:+ (${elapsed})}" >&2
-                echo "  stop it first, or give it one: timew tag @1 %$key" >&2
+                echo "  stop it first, or label it: timew annotate @1 '<what it was>'" >&2
             fi
             exit 1
         fi
 
+        # Dispatch by resolution rather than by a flag: a pending task means task
+        # work, and anything else is an adhoc labelled with the argument itself.
         task_json=$(task_for_key "$key")
+
         if [[ -z "$task_json" ]]; then
-            echo "Error: no pending Taskwarrior task described '$key'" >&2
-            exit 1
+            if looks_like_a_key "$key"; then
+                echo "Error: no pending Taskwarrior task described '$key'" >&2
+                echo "  to record it as work with no task, give it a label in words" >&2
+                exit 1
+            fi
+
+            # An adhoc carries no tags at all: the annotation is its label and its
+            # identity. timew start takes tags only, so labelling is a second call -
+            # and a failure there cancels the interval rather than leaving work
+            # recorded that nothing can name.
+            run timew start :yes >/dev/null || exit 1
+            if ! run timew annotate @1 "$key" :yes >/dev/null; then
+                run timew cancel :yes >/dev/null
+                echo "Error: the interval could not be labelled, so it was cancelled" >&2
+                exit 1
+            fi
+
+            # An adhoc has no repository and no page, and you are already somewhere
+            # when you get interrupted. It is recorded, not inhabited.
+            printf 'recording: %s\n' "$key"
+            exit 0
         fi
 
         # Nothing can be open by this point, so the interval opens unconditionally.
@@ -153,7 +198,7 @@ case "$verb" in
             echo "Nothing is being recorded" >&2
             exit 0
         fi
-        key=$(active_key)
+        label=$(active_label)
 
         # Closing the interval before rendering means the actuals include it.
         run timew stop :yes >/dev/null || exit 1
@@ -161,7 +206,7 @@ case "$verb" in
 
         # Stopping records that the work happened and nothing more. Whether it is
         # finished is a separate, deliberate act, in Taskwarrior and on its page.
-        [[ -n "$key" ]] || echo "The interval carried no identity" >&2
+        [[ -n "$label" ]] || echo "The interval carried no identity" >&2
         ;;
 
     status)
@@ -169,16 +214,17 @@ case "$verb" in
         # long. Where the session is, tmux already shows; what the journal thinks,
         # the journal no longer thinks anything about.
         interval=$(active_interval || true)
-        key=$(active_key)
+        IFS=$'\t' read -r kind label <<< "$(active_identity)"
         elapsed=$(timew get dom.active.duration 2>/dev/null || true)
 
         if [[ -z "$interval" ]]; then
             echo "work: nothing active"
-        elif [[ -z "$key" ]]; then
+        elif [[ -z "${label:-}" ]]; then
             printf 'work: an interval with no identity%s\n' "${elapsed:+ (${elapsed})}"
             printf '  tags: %s\n' "$(printf '%s' "$interval" | jq -r '.tags // [] | join(", ")')"
         else
-            printf 'work: %s%s\n' "$key" "${elapsed:+ (${elapsed})}"
+            printf 'work: %s%s%s\n' "$label" "${elapsed:+ (${elapsed})}" \
+                "$([[ "$kind" == "adhoc" ]] && printf ' [adhoc]')"
         fi
         ;;
 

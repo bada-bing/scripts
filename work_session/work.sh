@@ -11,7 +11,8 @@
 #
 # Usage:
 #   work.sh                              report the open interval
-#   work.sh start [<task-key>]           pick when no key is given
+#   work.sh start [<task-key>]           pick when nothing is given
+#   work.sh start "<label>"              work with no task, labelled in words
 #   work.sh stop                         close the interval, render the day
 #   work.sh render [<day>]               render a day's record again
 
@@ -25,6 +26,7 @@ Usage:
   work                        what is being recorded right now
   work start                  pick something, then start recording it
   work start <task-key>       start that one, skipping the picker
+  work start "<label>"        record work that has no task, under that label
   work stop                   close the interval and render the day
   work render [<day>]         render a day's record again from Timewarrior
 
