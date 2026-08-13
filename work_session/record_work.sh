@@ -91,24 +91,26 @@ case "$verb" in
             exit 1
         fi
 
-        # Timewarrior would close whatever is open by itself, but silently - the
-        # journal marker and the day's record would be left behind, which is the
-        # drift this whole gesture exists to prevent. The test is whether *any*
-        # interval is open, not whether an identified one is: an interval started
-        # by hand has no identity and no journal entry, so closing it silently
-        # would lose the most.
-        current=""
+        # Any open interval refuses the start - including one for this very key.
+        # An interval forgotten about is invisible if restarting quietly succeeds,
+        # and it keeps accruing: a sitting meant to be two hours becomes six. So
+        # the elapsed time is reported, because noticing it is the point.
+        #
+        # This means start is never a way to reach a session. Navigation belongs
+        # to the sessionizer, which touches no time at all.
         if active_interval >/dev/null; then
             current=$(active_key)
-            if [[ "$current" != "$key" ]]; then
-                if [[ -n "$current" ]]; then
-                    echo "Error: '$current' is already being recorded - stop it first" >&2
-                else
-                    echo "Error: an interval with no identity is already being recorded" >&2
-                    echo "  stop it first, or give it one: timew tag @1 %$key" >&2
-                fi
-                exit 1
+            elapsed=$(timew get dom.active.duration 2>/dev/null || true)
+            if [[ -n "$current" ]]; then
+                printf "Error: '%s' is already being recorded%s - stop it first\n" \
+                    "$current" "${elapsed:+ (${elapsed})}" >&2
+                echo "  to reach its session without touching the record: tn" >&2
+            else
+                printf 'Error: an interval with no identity is already being recorded%s\n' \
+                    "${elapsed:+ (${elapsed})}" >&2
+                echo "  stop it first, or give it one: timew tag @1 %$key" >&2
             fi
+            exit 1
         fi
 
         task_json=$(task_for_key "$key")
@@ -117,16 +119,13 @@ case "$verb" in
             exit 1
         fi
 
-        # Already recording it means the session is what is missing, so opening
-        # the interval again is skipped rather than treated as an error.
-        if [[ "$current" != "$key" ]]; then
-            tags=()
-            while IFS= read -r tag; do
-                [[ -n "$tag" ]] && tags+=("$tag")
-            done < <(interval_tags_for "$key" "$task_json")
+        # Nothing can be open by this point, so the interval opens unconditionally.
+        tags=()
+        while IFS= read -r tag; do
+            [[ -n "$tag" ]] && tags+=("$tag")
+        done < <(interval_tags_for "$key" "$task_json")
 
-            run timew start "${tags[@]}" :yes >/dev/null || exit 1
-        fi
+        run timew start "${tags[@]}" :yes >/dev/null || exit 1
 
         # Bootstrapping is skipped entirely on a dry run - it would really
         # create the session, which is the opposite of dry.
