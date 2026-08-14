@@ -96,12 +96,12 @@ active_label() {
     active_identity | cut -f2
 }
 
-# A key-shaped argument was meant as a task, so failing to resolve it is an error
-# rather than a licence to record an adhoc called "CHARLIE_99". A Logseq page with
-# that prefix says the same thing. Anything else is prose, and prose is a label.
-looks_like_a_key() {
-    [[ "$1" =~ ^[A-Za-z0-9]+[-_.][A-Za-z0-9]*[0-9]+$ ]] \
-        || "$SCRIPT_DIR/find_task_page.sh" "$1" >/dev/null 2>&1
+# An argument meant as a task must not quietly become an adhoc named after a typo,
+# so two things are treated as evidence that a task was intended: a Logseq page
+# exists for it, or it is shaped like a key. Anything else is prose, and prose is
+# a label.
+key_shaped() {
+    [[ "$1" =~ ^[A-Za-z0-9]+[-_.][A-Za-z0-9]*[0-9]+$ ]]
 }
 
 case "$verb" in
@@ -122,9 +122,29 @@ case "$verb" in
         task_json=$(task_for_key "$key")
 
         if [[ -z "$task_json" ]]; then
-            if looks_like_a_key "$key"; then
-                echo "Error: no pending Taskwarrior task described '$key'" >&2
-                echo "  to record it as work with no task, give it a label in words" >&2
+            # A link names a page, and only a page with a pending task can be
+            # started - whether or not the link looks like a task key. One rule
+            # for every link, matching what the picker shows.
+            # Whether the argument arrived as the link itself or as the key parsed
+            # out of one, the fact worth saying is the same: it is a link, so it
+            # names a page, and only a page with a pending task can be started.
+            link=""
+            if [[ "$key" == *"[["*"]]"* ]]; then
+                link="$key"
+            else
+                page_path=$("$SCRIPT_DIR/find_task_page.sh" "$key" 2>/dev/null) || page_path=""
+                [[ -n "$page_path" ]] && link="[[$(basename "$page_path" .md)]]"
+            fi
+
+            if [[ -n "$link" ]]; then
+                printf 'Error: %s is a link, not a task\n' "$link" >&2
+                echo "  bootstrap the task if you meant to work on it" >&2
+                exit 1
+            fi
+
+            if key_shaped "$key"; then
+                printf 'Error: %s has no task and no page\n' "$key" >&2
+                echo "  check the key" >&2
                 exit 1
             fi
 
