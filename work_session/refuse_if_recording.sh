@@ -18,15 +18,12 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 [[ "$(timew get dom.active 2>/dev/null || true)" == "1" ]] || exit 0
 
-IFS=$'\t' read -r kind label <<< "$("$SCRIPT_DIR/get_active_identity.sh")"
+label=$("$SCRIPT_DIR/get_active_identity.sh" | cut -f2)
 elapsed=$(timew get dom.active.duration 2>/dev/null || true)
 
 if [[ -n "${label:-}" ]]; then
     printf "Error: '%s' is already being recorded%s - stop it first\n" \
         "$label" "${elapsed:+ (${elapsed})}" >&2
-    # An adhoc has no session to be pointed at.
-    [[ "${kind:-}" == "task" ]] \
-        && echo "  to reach its session without touching the record: tn" >&2
 else
     printf 'Error: an interval with no identity is already being recorded%s\n' \
         "${elapsed:+ (${elapsed})}" >&2

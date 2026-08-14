@@ -179,7 +179,7 @@ case "$verb" in
             echo "Nothing is being recorded" >&2
             exit 0
         fi
-        label=$(active_label)
+        IFS=$'\t' read -r kind label <<< "$(active_identity)"
 
         # Closing the interval before rendering means the actuals include it.
         run timew stop :yes >/dev/null || exit 1
@@ -187,7 +187,18 @@ case "$verb" in
 
         # Stopping records that the work happened and nothing more. Whether it is
         # finished is a separate, deliberate act, in Taskwarrior and on its page.
-        [[ -n "$label" ]] || echo "The interval carried no identity" >&2
+        [[ -n "${label:-}" ]] || echo "The interval carried no identity" >&2
+
+        # The session outlives the interval on purpose: stopping records that the
+        # work happened, it does not tear down where it happened. The command is
+        # printed to copy, never run - and only when there is really a session to
+        # destroy, so the naming rule drifting from task_session.sh shows up as a
+        # missing hint rather than a wrong command.
+        if [[ "${kind:-}" == "task" ]]; then
+            session=$(printf '%s' "$label" | tr '.:' '--')
+            tmux has-session -t="$session" 2>/dev/null \
+                && printf '  to destroy its session: tmux kill-session -t %s\n' "$session"
+        fi
         ;;
 
     status)
