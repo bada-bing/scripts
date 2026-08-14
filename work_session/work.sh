@@ -54,7 +54,11 @@ case "$verb" in
 
     start)
         shift
-        # A key among the arguments means there is nothing to ask.
+        # Decline before asking. Offering a list that cannot be acted on wastes the
+        # choice and implies something can be started when nothing can.
+        "$SCRIPT_DIR/refuse_if_recording.sh" || exit 1
+
+        # An argument means there is nothing to ask.
         for arg in "$@"; do
             [[ "$arg" == -* ]] && continue
             exec "$SCRIPT_DIR/record_work.sh" start "$@"

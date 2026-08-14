@@ -112,29 +112,10 @@ case "$verb" in
             exit 1
         fi
 
-        # Any open interval refuses the start - including one for this very key.
-        # An interval forgotten about is invisible if restarting quietly succeeds,
-        # and it keeps accruing: a sitting meant to be two hours becomes six. So
-        # the elapsed time is reported, because noticing it is the point.
-        #
-        # This means start is never a way to reach a session. Navigation belongs
-        # to the sessionizer, which touches no time at all.
-        if active_interval >/dev/null; then
-            IFS=$'\t' read -r current_kind current <<< "$(active_identity)"
-            elapsed=$(timew get dom.active.duration 2>/dev/null || true)
-            if [[ -n "${current:-}" ]]; then
-                printf "Error: '%s' is already being recorded%s - stop it first\n" \
-                    "$current" "${elapsed:+ (${elapsed})}" >&2
-                # An adhoc has no session to be pointed at.
-                [[ "${current_kind:-}" == "task" ]] \
-                    && echo "  to reach its session without touching the record: tn" >&2
-            else
-                printf 'Error: an interval with no identity is already being recorded%s\n' \
-                    "${elapsed:+ (${elapsed})}" >&2
-                echo "  stop it first, or label it: timew annotate @1 '<what it was>'" >&2
-            fi
-            exit 1
-        fi
+        # Start is never a way to reach a session, so any open interval refuses it.
+        # The picker runs this same check before it asks, so reaching here with
+        # something open means the operation was called directly.
+        "$SCRIPT_DIR/refuse_if_recording.sh" || exit 1
 
         # Dispatch by resolution rather than by a flag: a pending task means task
         # work, and anything else is an adhoc labelled with the argument itself.
