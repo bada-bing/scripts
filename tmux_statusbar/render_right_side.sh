@@ -8,6 +8,7 @@
 MAX_TARGET_WIDTH=80    # cap on wide screens
 LEFT_WIDTH=25          # must match MINIMUM_WIDTH in render_left_side.sh
 MIN_CENTER_WIDTH=20    # columns to always leave for the window-list "tabs"
+RIGHT_PAD='  '         # kept clear at the end, so nothing touches the frame
 
 # --- Arguments from tmux ---
 session_name="$1"
@@ -60,8 +61,6 @@ fi
 session_color=$($HOME/Developer/toolbox/scripts/tmux_statusbar/session_color.sh "$session_name" right)
 task_progress=$($HOME/Developer/toolbox/scripts/tmux_statusbar/render_active_work.sh)
 current_sitting=$($HOME/Developer/toolbox/scripts/tmux_statusbar/get_current_sitting.sh)
-datetime=$(date '+%a, %b %e')
-hostname="[$(hostname -s)]"
 
 # 2. Assemble the content string
 if [ -n "$current_sitting" ]; then
@@ -76,18 +75,30 @@ visible_text=$(echo "$content_string" | sed -E 's/#\[[^]]*\]//g')
 visible_length=${#visible_text}
 
 # 4. Pad or truncate the visible text to match the TARGET_WIDTH
-# We add padding to the left to right-align the content.
-if [ "$visible_length" -gt "$TARGET_WIDTH" ]; then
+# We add padding to the left to right-align the content. RIGHT_PAD is taken out of
+# the width rather than added to it, so the coloured block keeps its size and the
+# content simply ends a couple of columns short of the frame.
+INNER_WIDTH=$((TARGET_WIDTH - ${#RIGHT_PAD}))
+[ "$INNER_WIDTH" -lt 0 ] && INNER_WIDTH=0
+
+if [ "$INNER_WIDTH" -le 1 ]; then
+    # Too narrow for even one character and an ellipsis, so the right side stands
+    # down entirely and the window list keeps the columns. Truncating here would ask
+    # cut for the range 1-0, which it rejects outright.
+    final_text=""
+elif [ "$visible_length" -gt "$INNER_WIDTH" ]; then
     # Truncate the string if it's too long
-    final_text=$(echo "$visible_text" | cut -c 1-$((TARGET_WIDTH-1)))"…"
-elif [ "$visible_length" -lt "$TARGET_WIDTH" ]; then
+    final_text=$(echo "$visible_text" | cut -c 1-$((INNER_WIDTH-1)))"…"
+elif [ "$visible_length" -lt "$INNER_WIDTH" ]; then
     # Pad with spaces if it's too short
-    padding_length=$((TARGET_WIDTH - visible_length))
+    padding_length=$((INNER_WIDTH - visible_length))
     padding=$(printf '%*s' "$padding_length")
     final_text="$padding$visible_text"
 else
     final_text="$visible_text"
 fi
+
+[ -n "$final_text" ] && final_text="$final_text$RIGHT_PAD"
 
 # 5. Combine the session color with the final, width-adjusted text
 # A reset `#[default]` is used to ensure formatting doesn't leak.
