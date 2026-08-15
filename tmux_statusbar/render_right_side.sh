@@ -5,9 +5,23 @@
 # which allows for a consistently sized colored background.
 
 # --- Configuration ---
+# The block is deliberately fixed-width: the window list is centred between
+# the two sides, so a right side that grew with its content would shove the
+# tabs sideways every time the tracked task changed. Empty colour is the price
+# of tabs that stay where they were.
+#
+# What the width has to be, though, is per-screen. These two numbers were both
+# too small to bind, which made the shrink below dead code: on a 129-column
+# laptop it computed 84 and on a 220-column monitor 175, so the cap returned 80
+# on both and the laptop rendered the same block as the monitor - leaving the
+# window list 24 columns and truncating the window names.
 MAX_TARGET_WIDTH=80    # cap on wide screens
-LEFT_WIDTH=25          # must match MINIMUM_WIDTH in render_left_side.sh
-MIN_CENTER_WIDTH=20    # columns to always leave for the window-list "tabs"
+LEFT_WIDTH=33          # the widest the left side gets: MINIMUM_WIDTH is 25, but
+                       # a session name longer than that overflows it, and
+                       # wescale_module_federation renders 33
+MIN_CENTER_WIDTH=50    # columns to always leave for the window-list "tabs".
+                       # Measured: a three-window task session needs 43, and
+                       # this session (raycast-telltale, run, zsh) needs 49
 RIGHT_PAD='  '         # kept clear at the end, so nothing touches the frame
 
 # --- Arguments from tmux ---
@@ -87,15 +101,20 @@ if [ "$INNER_WIDTH" -le 1 ]; then
     # cut for the range 1-0, which it rejects outright.
     final_text=""
 elif [ "$visible_length" -gt "$INNER_WIDTH" ]; then
-    # Truncate the string if it's too long
+    # Truncate the string if it's too long. This is the one branch that has to
+    # use the stripped copy: cutting by character count would slice through a
+    # #[...] sequence and leave half an escape on the bar. Nothing on the right
+    # side is styled today, so nothing is lost - but this is the branch to
+    # revisit if that changes.
     final_text=$(echo "$visible_text" | cut -c 1-$((INNER_WIDTH-1)))"…"
-elif [ "$visible_length" -lt "$INNER_WIDTH" ]; then
-    # Pad with spaces if it's too short
-    padding_length=$((INNER_WIDTH - visible_length))
-    padding=$(printf '%*s' "$padding_length")
-    final_text="$padding$visible_text"
 else
-    final_text="$visible_text"
+    # Pad with spaces if it's too short, then print the *unstripped* string.
+    # It used to print the stripped copy, which silently discarded any colour
+    # the content carried; the strip exists to measure, not to render.
+    padding_length=$((INNER_WIDTH - visible_length))
+    padding=""
+    [ "$padding_length" -gt 0 ] && padding=$(printf '%*s' "$padding_length")
+    final_text="$padding$content_string"
 fi
 
 [ -n "$final_text" ] && final_text="$final_text$RIGHT_PAD"
