@@ -69,8 +69,13 @@ if [ -n "$running" ] && kill -0 "$running" 2>/dev/null; then
 fi
 tmux set-option -g @spinner_pid "$$" 2>/dev/null || exit 0
 
+# Only ever release the slot this instance owns. Clearing it unconditionally
+# means a copy being killed wipes the pid a replacement has already written,
+# and the option then reads empty while an animator runs - so the next busy
+# window starts a second one and both push frames.
 cleanup() {
-    tmux set-option -gu @spinner_pid 2>/dev/null
+    [ "$(tmux show-option -gqv @spinner_pid)" = "$$" ] &&
+        tmux set-option -gu @spinner_pid 2>/dev/null
     exit 0
 }
 trap cleanup INT TERM
