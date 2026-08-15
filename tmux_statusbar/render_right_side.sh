@@ -59,13 +59,13 @@ fi
 # 1. Gather the components
 session_color=$($HOME/Developer/toolbox/scripts/tmux_statusbar/session_color.sh "$session_name" right)
 task_progress=$($HOME/Developer/toolbox/scripts/tmux_statusbar/render_active_work.sh)
-timew_today=$($HOME/Developer/toolbox/scripts/tmux_statusbar/get_timew_today.sh)
+current_sitting=$($HOME/Developer/toolbox/scripts/tmux_statusbar/get_current_sitting.sh)
 datetime=$(date '+%a, %b %e')
 hostname="[$(hostname -s)]"
 
 # 2. Assemble the content string
-if [ -n "$timew_today" ]; then
-    content_string="$task_progress  ⏱ $timew_today"
+if [ -n "$current_sitting" ]; then
+    content_string="$task_progress  ⏱ $current_sitting"
 else
     content_string="$task_progress"
 fi
