@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 #
 # Renders a day's "# Work" block from Timewarrior - the day's record: one entry per
-# piece of work, with the number of sessions and the time they add up to.
+# piece of work, with the time it adds up to and how many sittings that took.
 #
-#   - [[WFC-1146-integrate-umami]] 2S (3h)
-#   - fixed the deployment pipeline 1S (40m)
+#   - [[WFC-1146-integrate-umami]] 3h ×2
+#   - fixed the deployment pipeline 40m ×1
+#
+# The time comes first because it is the fact being read; the count says how far the
+# work was broken up. "S" for sessions sat exactly where a duration unit would.
 #
 # A linked entry is task work and a plain one is an adhoc, which is a consequence
 # of where each takes its label rather than a flag anyone has to maintain.
@@ -154,7 +157,7 @@ while IFS=$'\t' read -r kind id sessions seconds before after; do
         entry="$id"
     fi
 
-    annotation="${sessions}S ($(format_duration "$seconds"))"
+    annotation="$(format_duration "$seconds") ×${sessions}"
     line="$entry $annotation"
 
     # The arrows are for the reader: the figures are already right without them,
