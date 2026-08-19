@@ -67,7 +67,7 @@ else
     content_string="$task_progress"
 fi
 
-# 3. Sanitize and calculate visible length
+# 3. Sanitize and measure what that will occupy on the bar
 visible_text=$(strip_format "$content_string")
 visible_length=$(measure_width "$visible_text")
 
@@ -79,21 +79,25 @@ INNER_WIDTH=$((TARGET_WIDTH - ${#RIGHT_PAD}))
 [ "$INNER_WIDTH" -lt 0 ] && INNER_WIDTH=0
 
 if [ "$INNER_WIDTH" -le 1 ]; then
-    # Too narrow for even one character and an ellipsis, so the right side stands
-    # down entirely and the window list keeps the columns. Truncating here would ask
-    # cut for the range 1-0, which it rejects outright.
+    # Too narrow for even one column and an ellipsis, so the right side stands
+    # down entirely and the window list keeps the columns.
     final_text=""
-elif [ "$visible_length" -gt "$INNER_WIDTH" ]; then
-    # Truncate the string if it's too long. This is the one branch that has to
-    # use the stripped copy: cutting by character count would slice through a
-    # #[...] sequence and leave half an escape on the bar. Nothing on the right
-    # side is styled today, so nothing is lost - but this is the branch to
-    # revisit if that changes.
-    final_text=$(echo "$visible_text" | cut -c 1-$((INNER_WIDTH-1)))"…"
 else
-    # Pad with spaces if it's too short, then print the *unstripped* string.
-    # It used to print the stripped copy, which silently discarded any colour
-    # the content carried; the strip exists to measure, not to render.
+    if [ "$visible_length" -gt "$INNER_WIDTH" ]; then
+        # A cut has to work on the stripped copy: cutting a formatted string
+        # could slice through a #[...] sequence and leave half an escape on the
+        # bar. Nothing on the right side is styled today, so nothing is lost -
+        # but this is the branch to revisit if that changes.
+        #
+        # A cut lands a column short whenever the budget ends mid-glyph, since a
+        # two-column glyph with one column left is dropped rather than
+        # overflowed. Measuring the result rather than assuming it filled the
+        # budget is what lets the padding below close that gap.
+        content_string=$(truncate_to_width "$visible_text" $((INNER_WIDTH - 1)))"…"
+        visible_length=$(measure_width "$content_string")
+    fi
+
+    # Pad on the left to right-align the content.
     padding_length=$((INNER_WIDTH - visible_length))
     padding=""
     [ "$padding_length" -gt 0 ] && padding=$(printf '%*s' "$padding_length")

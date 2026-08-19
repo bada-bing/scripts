@@ -48,8 +48,57 @@ strip_format() {
     printf '%s' "$1" | sed -E 's/#\[[^]]*\]//g'
 }
 
-# The width of an already-stripped string.
+# Measuring and cutting an already-stripped string, both in the columns tmux
+# gives it.
+#
+# Characters are not columns: an emoji takes two, and counting it as one makes
+# the rendered block a column wider than the size the layout was built around.
+# The window list centred between the two sides is what pays for that.
+#
+# Which glyphs are wide was measured against tmux rather than read off the
+# Unicode tables, because the two disagree - tmux gives U+23F1 WATCH one column
+# where its East Asian Width class asks for two. Of everything the bar prints
+# only the moon phases came back as two columns, and they are also the only
+# glyphs above U+FFFF, hence the only ones UTF-8 stores in four bytes.
+#
+# So the walk below decodes UTF-8 by sequence length and charges a four-byte
+# sequence two columns. awk is pinned to C so that it counts bytes whatever the
+# caller's locale is, which is what makes the decoding predictable.
+#
+# A negative limit measures; a limit of zero or more cuts to that many columns.
+# One program serves both so that a cut can never disagree with a measurement
+# about where the string ends.
+_WALK='
+function seqlen(s) {
+    if (s ~ /^[\360-\367][\200-\277][\200-\277][\200-\277]/) return 4
+    if (s ~ /^[\340-\357][\200-\277][\200-\277]/) return 3
+    if (s ~ /^[\300-\337][\200-\277]/) return 2
+    return 1
+}
+{
+    rest = $0
+    columns = 0
+    kept = ""
+    while (length(rest) > 0) {
+        n = seqlen(rest)
+        w = (n == 4) ? 2 : 1
+        if (limit >= 0 && columns + w > limit) break
+        kept = kept substr(rest, 1, n)
+        columns += w
+        rest = substr(rest, n + 1)
+    }
+    if (limit >= 0) printf "%s", kept; else printf "%d", columns
+}'
+
+# The width a string will occupy on the bar.
 measure_width() {
-    _text=$1
-    printf '%s' "${#_text}"
+    [ -n "$1" ] || { printf '0'; return; }
+    printf '%s' "$1" | LC_ALL=C awk -v limit=-1 "$_WALK"
+}
+
+# The longest prefix of a string fitting a column budget. A budget the string
+# already fits comes back whole.
+truncate_to_width() {
+    [ -n "$1" ] || return 0
+    printf '%s' "$1" | LC_ALL=C awk -v limit="$2" "$_WALK"
 }
