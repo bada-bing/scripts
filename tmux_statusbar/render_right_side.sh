@@ -4,6 +4,8 @@
 # It ensures the output has a fixed width by truncating or padding,
 # which allows for a consistently sized colored background.
 
+. "$(dirname "$0")/lib.sh"
+
 # --- Configuration ---
 # The block is deliberately fixed-width: the window list is centred between
 # the two sides, so a right side that grew with its content would shove the
@@ -29,29 +31,11 @@ session_name="$1"
 client_width="$2"
 
 # --- Cache ---
-# tmux re-runs this script on every status redraw, not once per
-# status-interval, and an animated busy marker forces several redraws a
-# second. Gathering the components costs about 100ms - almost all of it
-# Taskwarrior and Timewarrior queries - which is far too much to pay per
-# frame. So the assembled output is reused for a moment.
-#
-# The TTL matches status-interval: the bar is no more stale than it was
-# before anything started forcing redraws. Everything shown here is a
-# minute-resolution figure, so there is nothing to see at frame rate anyway.
-#
 # The key covers both arguments, so a resized client or a different session
-# renders fresh rather than inheriting another one's width. A session name
-# containing a slash simply never matches a cache file, which costs speed
-# and nothing else.
-CACHE_TTL=2s
-CACHE_DIR="${TMPDIR:-/tmp}/tmux-statusbar-cache"
-CACHE_FILE="$CACHE_DIR/right-$session_name-$client_width"
+# renders fresh rather than inheriting another one's width.
+CACHE_KEY="right-$session_name-$client_width"
 
-if [ -n "$(find "$CACHE_FILE" -mtime "-$CACHE_TTL" -print -quit 2>/dev/null)" ]; then
-    cat "$CACHE_FILE"
-    exit 0
-fi
-mkdir -p "$CACHE_DIR" 2>/dev/null
+get_cache "$CACHE_KEY" && exit 0
 
 # --- Logic ---
 
@@ -84,9 +68,8 @@ else
 fi
 
 # 3. Sanitize and calculate visible length
-# The sed command removes tmux formatting sequences like #[...]
-visible_text=$(echo "$content_string" | sed -E 's/#\[[^]]*\]//g')
-visible_length=${#visible_text}
+visible_text=$(strip_format "$content_string")
+visible_length=$(measure_width "$visible_text")
 
 # 4. Pad or truncate the visible text to match the TARGET_WIDTH
 # We add padding to the left to right-align the content. RIGHT_PAD is taken out of
@@ -122,5 +105,5 @@ fi
 # 5. Combine the session color with the final, width-adjusted text
 # A reset `#[default]` is used to ensure formatting doesn't leak.
 output=$(printf "%s%s#[default]" "$session_color" "$final_text")
-printf '%s' "$output" > "$CACHE_FILE" 2>/dev/null
+set_cache "$CACHE_KEY" "$output"
 printf '%s' "$output"

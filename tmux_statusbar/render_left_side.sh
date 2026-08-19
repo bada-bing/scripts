@@ -3,6 +3,8 @@
 # This script renders the left side of the tmux status bar.
 # It displays indicators for various tmux modes and ensures a minimum width.
 
+. "$(dirname "$0")/lib.sh"
+
 # --- Configuration ---
 MINIMUM_WIDTH=25
 
@@ -21,23 +23,13 @@ window_zoomed_flag="$3"
 session_name="$4"
 
 # --- Cache ---
-# As on the right side: tmux runs this once per status redraw, and an
-# animated busy marker forces several of those a second. See
-# render_right_side.sh for the reasoning.
-#
 # The key is every argument, so each mode indicator appears the instant tmux
 # reports it - pressing the prefix asks for a combination never rendered
 # before and therefore always renders fresh. Only the count of waiting
 # windows can lag, and it already moved at status-interval.
-CACHE_TTL=2s
-CACHE_DIR="${TMPDIR:-/tmp}/tmux-statusbar-cache"
-CACHE_FILE="$CACHE_DIR/left-$client_prefix-$pane_mode-$window_zoomed_flag-$session_name"
+CACHE_KEY="left-$client_prefix-$pane_mode-$window_zoomed_flag-$session_name"
 
-if [ -n "$(find "$CACHE_FILE" -mtime "-$CACHE_TTL" -print -quit 2>/dev/null)" ]; then
-    cat "$CACHE_FILE"
-    exit 0
-fi
-mkdir -p "$CACHE_DIR" 2>/dev/null
+get_cache "$CACHE_KEY" && exit 0
 
 # --- Logic ---
 # 1. Determine the raw output based on mode priority
@@ -72,8 +64,7 @@ if [ "${waiting_windows:-0}" -gt 0 ]; then
 fi
 
 # 3. Calculate visible length (by stripping format characters)
-visible_text=$(echo "$raw_output" | sed -E 's/#\[[^]]*\]//g')
-visible_length=${#visible_text}
+visible_length=$(measure_width "$(strip_format "$raw_output")")
 
 # 4. Calculate and create padding
 padding=""
@@ -86,5 +77,5 @@ fi
 
 # 5. Print the final, padded output
 output=$(printf "%s%s" "$raw_output" "$padding")
-printf '%s' "$output" > "$CACHE_FILE" 2>/dev/null
+set_cache "$CACHE_KEY" "$output"
 printf '%s' "$output"
