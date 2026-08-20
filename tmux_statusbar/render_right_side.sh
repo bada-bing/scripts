@@ -67,9 +67,8 @@ else
     content_string="$task_progress"
 fi
 
-# 3. Sanitize and measure what that will occupy on the bar
-visible_text=$(strip_format "$content_string")
-visible_length=$(measure_width "$visible_text")
+# 3. Measure what that will occupy on the bar
+visible_length=$(measure_width "$content_string")
 
 # 4. Pad or truncate the visible text to match the TARGET_WIDTH
 # We add padding to the left to right-align the content. RIGHT_PAD is taken out of
@@ -84,16 +83,16 @@ if [ "$INNER_WIDTH" -le 1 ]; then
     final_text=""
 else
     if [ "$visible_length" -gt "$INNER_WIDTH" ]; then
-        # A cut has to work on the stripped copy: cutting a formatted string
-        # could slice through a #[...] sequence and leave half an escape on the
-        # bar. Nothing on the right side is styled today, so nothing is lost -
-        # but this is the branch to revisit if that changes.
+        # A cut returns the content stripped of its formatting, since cutting a
+        # formatted string could slice through a #[...] sequence and leave half
+        # an escape on the bar. Nothing on the right side is styled today, so
+        # nothing is lost - but this is the branch to revisit if that changes.
         #
         # A cut lands a column short whenever the budget ends mid-glyph, since a
         # two-column glyph with one column left is dropped rather than
         # overflowed. Measuring the result rather than assuming it filled the
         # budget is what lets the padding below close that gap.
-        content_string=$(truncate_to_width "$visible_text" $((INNER_WIDTH - 1)))"…"
+        content_string=$(truncate_to_width "$content_string" $((INNER_WIDTH - 1)))"…"
         visible_length=$(measure_width "$content_string")
     fi
 

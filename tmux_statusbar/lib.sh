@@ -39,17 +39,7 @@ set_cache() {
     printf '%s' "$2" > "$CACHE_DIR/$1" 2>/dev/null
 }
 
-# Drops tmux's #[...] formatting sequences, which occupy no columns.
-#
-# This is for measuring only. What gets printed is always the unstripped
-# string: stripping to measure and then printing the stripped copy silently
-# discards whatever colour the content carried.
-strip_format() {
-    printf '%s' "$1" | sed -E 's/#\[[^]]*\]//g'
-}
-
-# Measuring and cutting an already-stripped string, both in the columns tmux
-# gives it.
+# Measuring and cutting a formatted string, both in the columns tmux gives it.
 #
 # Characters are not columns: an emoji takes two, and counting it as one makes
 # the rendered block a column wider than the size the layout was built around.
@@ -65,6 +55,11 @@ strip_format() {
 # sequence two columns. awk is pinned to C so that it counts bytes whatever the
 # caller's locale is, which is what makes the decoding predictable.
 #
+# Both entry points strip tmux's #[...] sequences first, since those occupy no
+# columns. Stripping here rather than at the call site is deliberate: measuring
+# a formatted string without stripping it is silently wrong, so the step that
+# must not be forgotten is not left to whoever is calling.
+#
 # A negative limit measures; a limit of zero or more cuts to that many columns.
 # One program serves both so that a cut can never disagree with a measurement
 # about where the string ends.
@@ -76,6 +71,7 @@ function seqlen(s) {
     return 1
 }
 {
+    gsub(/#\[[^]]*\]/, "")
     rest = $0
     columns = 0
     kept = ""
@@ -97,7 +93,7 @@ measure_width() {
 }
 
 # The longest prefix of a string fitting a column budget. A budget the string
-# already fits comes back whole.
+# already fits comes back whole, stripped of its formatting.
 truncate_to_width() {
     [ -n "$1" ] || return 0
     printf '%s' "$1" | LC_ALL=C awk -v limit="$2" "$_WALK"

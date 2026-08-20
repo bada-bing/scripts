@@ -64,7 +64,7 @@ if [ "${waiting_windows:-0}" -gt 0 ]; then
 fi
 
 # 3. Calculate visible length (by stripping format characters)
-visible_length=$(measure_width "$(strip_format "$raw_output")")
+visible_length=$(measure_width "$raw_output")
 
 # 4. Calculate and create padding
 padding=""
