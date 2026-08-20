@@ -57,10 +57,33 @@ fi
 
 # 1. Gather the components
 session_color=$($HOME/Developer/toolbox/scripts/tmux_statusbar/session_color.sh "$session_name" right)
-task_progress=$($HOME/Developer/toolbox/scripts/tmux_statusbar/render_active_work.sh)
+active_work=$($HOME/Developer/toolbox/scripts/tmux_statusbar/get_active_work.sh)
 current_sitting=$($HOME/Developer/toolbox/scripts/tmux_statusbar/get_current_sitting.sh)
 
+kind=$(printf '%s' "$active_work" | cut -f1)
+identity=$(printf '%s' "$active_work" | cut -f2)
+step=$(printf '%s' "$active_work" | cut -f3)
+now_item=$(printf '%s' "$active_work" | cut -f4)
+
 # 2. Assemble the content string
+case "$kind" in
+    adhoc)
+        task_progress="$identity"
+        ;;
+    task)
+        task_progress="Task $identity"
+        if [ -n "$step" ] && [ -n "$now_item" ]; then
+            task_progress="$task_progress ▶ Step $step ┋ NOW $now_item"
+        fi
+        ;;
+    unlabelled)
+        task_progress="  UNLABELLED WORK"
+        ;;
+    *)
+        task_progress="  NO ACTIVE WORK"
+        ;;
+esac
+
 if [ -n "$current_sitting" ]; then
     content_string="$task_progress  ⏱ $current_sitting"
 else
