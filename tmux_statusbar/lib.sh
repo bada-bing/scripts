@@ -19,6 +19,8 @@
 # The TTL matches status-interval, so the bar is no more stale than it was
 # before anything began forcing redraws. Everything shown here is a
 # minute-resolution figure, so there is nothing to see at frame rate anyway.
+_TAB=$(printf '\t')
+
 CACHE_TTL=2s
 CACHE_DIR="${TMPDIR:-/tmp}/tmux-statusbar-cache"
 
@@ -97,4 +99,73 @@ measure_width() {
 truncate_to_width() {
     [ -n "$1" ] || return 0
     printf '%s' "$1" | LC_ALL=C awk -v limit="$2" "$_WALK"
+}
+
+# Fits a list of segments into a column budget, returning exactly that many
+# columns.
+#
+# Segments arrive on stdin, one per line, in the order they appear on the bar:
+#
+#   <priority>	<elidable>	<text>
+#
+# Priority is a number where lower means more important. Elidable is 1 for a
+# segment whose tail may be cut and 0 for one that is only ever kept whole.
+#
+# When the segments do not fit, the least important one goes, then the next,
+# until they do. Reaching an elidable one cuts it to what is left instead of
+# dropping it, since a segment that can lose its tail should lose only that.
+# The last segment standing is always cut rather than dropped, so a budget too
+# small for anything whole still says something.
+#
+# This is what keeps the elapsed time on the bar. It is the shortest segment
+# and the most important, so it is the last thing that could go, where cutting
+# the assembled line from the right took it first.
+#
+# A segment carries its own leading separator, so dropping one takes its
+# separator with it and no dangling glyph is left behind.
+fit_to_width() {
+    _limit=$1
+    _segments=$(cat)
+
+    while [ -n "$_segments" ]; do
+        [ "$(measure_width "$(_join_segments "$_segments")")" -le "$_limit" ] && break
+
+        _victim=$(printf '%s\n' "$_segments" | sort -t"$_TAB" -k1,1nr | head -n 1)
+        _priority=$(printf '%s' "$_victim" | cut -f1)
+        _elidable=$(printf '%s' "$_victim" | cut -f2)
+        _survivors=$(printf '%s\n' "$_segments" | awk -F"$_TAB" -v p="$_priority" '$1 != p')
+
+        if [ "$_elidable" = "0" ] && [ -n "$_survivors" ]; then
+            _segments=$_survivors
+            continue
+        fi
+
+        # Cut it to whatever the segments it cannot displace have left over,
+        # one column of which the ellipsis takes.
+        _room=$((_limit - $(measure_width "$(_join_segments "$_survivors")") - 1))
+        if [ "$_room" -lt 1 ]; then
+            _segments=$_survivors
+            continue
+        fi
+
+        _cut=$(truncate_to_width "$(printf '%s' "$_victim" | cut -f3-)" "$_room")
+        _segments=$(printf '%s\n' "$_segments" \
+            | awk -F"$_TAB" -v OFS="$_TAB" -v p="$_priority" -v t="$_cut" \
+                  '$1 == p { $3 = t "\342\200\246" } { print }')
+        break
+    done
+
+    _text=$(_join_segments "$_segments")
+    _padding=$((_limit - $(measure_width "$_text")))
+    [ "$_padding" -gt 0 ] && _text="$(printf '%*s' "$_padding")$_text"
+    printf '%s' "$_text"
+}
+
+# The segments' texts, run together in the order given.
+_join_segments() {
+    printf '%s\n' "$1" | while IFS= read -r _line; do
+        [ -n "$_line" ] || continue
+        _rest=${_line#*"$_TAB"}
+        printf '%s' "${_rest#*"$_TAB"}"
+    done
 }

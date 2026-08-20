@@ -65,38 +65,46 @@ identity=$(printf '%s' "$active_work" | cut -f2)
 step=$(printf '%s' "$active_work" | cut -f3)
 now_item=$(printf '%s' "$active_work" | cut -f4)
 
-# 2. Assemble the content string
+# 2. Assemble the segments, in the order they appear on the bar
+#
+# The priority is what the bar gives up first when the block cannot hold
+# everything, and the elidable flag marks a segment that loses its tail rather
+# than the whole of itself. The elapsed time is the most important because it
+# is the one figure that moves, and the phase the least because the key and
+# the NOW item already say where the task stands.
+#
+# Each segment carries its own leading separator, so dropping one takes its
+# separator with it rather than leaving a glyph attached to nothing.
+NEWLINE='
+'
+segments=""
+add_segment() {
+    segments="${segments}${segments:+$NEWLINE}$1$_TAB$2$_TAB$3"
+}
+
 case "$kind" in
     adhoc)
-        task_progress="$identity"
+        add_segment 2 1 "$identity"
         ;;
     task)
-        task_progress="Task $identity"
-        if [ -n "$step" ] && [ -n "$now_item" ]; then
-            task_progress="$task_progress ▶ Step $step ┋ NOW $now_item"
-        fi
+        add_segment 2 1 "Task $identity"
+        [ -n "$step" ] && add_segment 4 0 " ▶ Step $step"
+        [ -n "$now_item" ] && add_segment 3 1 " ┋ NOW $now_item"
         ;;
     unlabelled)
-        task_progress="  UNLABELLED WORK"
+        add_segment 2 1 "  UNLABELLED WORK"
         ;;
     *)
-        task_progress="  NO ACTIVE WORK"
+        add_segment 2 1 "  NO ACTIVE WORK"
         ;;
 esac
 
-if [ -n "$current_sitting" ]; then
-    content_string="$task_progress  ⏱ $current_sitting"
-else
-    content_string="$task_progress"
-fi
+[ -n "$current_sitting" ] && add_segment 1 0 "  ⏱ $current_sitting"
 
-# 3. Measure what that will occupy on the bar
-visible_length=$(measure_width "$content_string")
-
-# 4. Pad or truncate the visible text to match the TARGET_WIDTH
-# We add padding to the left to right-align the content. RIGHT_PAD is taken out of
-# the width rather than added to it, so the coloured block keeps its size and the
-# content simply ends a couple of columns short of the frame.
+# 3. Fit them to the block
+# RIGHT_PAD is taken out of the width rather than added to it, so the coloured
+# block keeps its size and the content simply ends a couple of columns short of
+# the frame.
 INNER_WIDTH=$((TARGET_WIDTH - ${#RIGHT_PAD}))
 [ "$INNER_WIDTH" -lt 0 ] && INNER_WIDTH=0
 
@@ -105,25 +113,8 @@ if [ "$INNER_WIDTH" -le 1 ]; then
     # down entirely and the window list keeps the columns.
     final_text=""
 else
-    if [ "$visible_length" -gt "$INNER_WIDTH" ]; then
-        # A cut returns the content stripped of its formatting, since cutting a
-        # formatted string could slice through a #[...] sequence and leave half
-        # an escape on the bar. Nothing on the right side is styled today, so
-        # nothing is lost - but this is the branch to revisit if that changes.
-        #
-        # A cut lands a column short whenever the budget ends mid-glyph, since a
-        # two-column glyph with one column left is dropped rather than
-        # overflowed. Measuring the result rather than assuming it filled the
-        # budget is what lets the padding below close that gap.
-        content_string=$(truncate_to_width "$content_string" $((INNER_WIDTH - 1)))"…"
-        visible_length=$(measure_width "$content_string")
-    fi
-
-    # Pad on the left to right-align the content.
-    padding_length=$((INNER_WIDTH - visible_length))
-    padding=""
-    [ "$padding_length" -gt 0 ] && padding=$(printf '%*s' "$padding_length")
-    final_text="$padding$content_string"
+    final_text=$(printf '%s
+' "$segments" | fit_to_width "$INNER_WIDTH")
 fi
 
 [ -n "$final_text" ] && final_text="$final_text$RIGHT_PAD"
