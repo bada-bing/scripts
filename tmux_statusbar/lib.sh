@@ -31,14 +31,84 @@ CACHE_DIR="${TMPDIR:-/tmp}/tmux-statusbar-cache"
 # another one's answer. A key containing a slash simply never matches a file,
 # which costs speed and nothing else.
 get_cache() {
-    _cache_file="$CACHE_DIR/$1"
-    [ -n "$(find "$_cache_file" -mtime "-$CACHE_TTL" -print -quit 2>/dev/null)" ] || return 1
-    cat "$_cache_file"
+    cache_is_fresh "$1" || return 1
+    read_cache "$1"
 }
 
 set_cache() {
     mkdir -p "$CACHE_DIR" 2>/dev/null
     printf '%s' "$2" > "$CACHE_DIR/$1" 2>/dev/null
+}
+
+# Whether a key's cached render is younger than the TTL.
+cache_is_fresh() {
+    [ -n "$(find "$CACHE_DIR/$1" -mtime "-$CACHE_TTL" -print -quit 2>/dev/null)" ]
+}
+
+# A key's cached render whatever its age, and nothing at all where there is
+# none. Serving one that has gone stale is what lets a side answer within a
+# frame however long gathering its content takes - see below for why a side
+# that gathers on the render path cannot be relied on to answer at all.
+read_cache() {
+    cat "$CACHE_DIR/$1" 2>/dev/null
+}
+
+# Refreshing a cache from off the render path.
+#
+# tmux re-runs a status #() job on every redraw and replaces the one in flight
+# rather than waiting for it, so a job taking longer than the gap between two
+# redraws never finishes and so never writes anything. The spinner pushes a
+# redraw every FRAME_DELAY while any window is busy, and gathering the right
+# side costs twice that - so every renderer was killed part way, the cache
+# stayed empty, and the bar went on painting whatever had last completed. A bar
+# reading "NO ACTIVE WORK" with an interval open is the one thing
+# get_active_work.sh exists to prevent, and this arrived at it by another road.
+#
+# So the cache is no longer an optimisation the render path may skip: it is the
+# only thing the render path reads. The job reads a file and always finishes,
+# and the gathering runs in a process tmux does not own. The bar can then be a
+# redraw or two behind, and can no longer be wrong.
+#
+# Making the gathering merely faster than a frame was the alternative, and it
+# ties being right to winning a race - one more query, or a larger graph to
+# search, and the bar starts lying again with nothing to say so.
+
+# Whether a refresh for a key is already under way. Only an optimisation, the
+# lock being what actually admits one refresher, but it saves forking a process
+# several times a second for it to find the lock taken.
+refresh_running() {
+    [ -d "$CACHE_DIR/.refresh-$1" ]
+}
+
+# Runs a command detached from the caller, so that tmux killing the job which
+# started it leaves it running.
+#
+# The descriptors matter as much as the detachment: tmux reads a job's stdout
+# and takes end-of-output for the job ending, so a background child holding
+# that pipe open would leave the job looking alive and stop the next one from
+# ever being started.
+refresh_detached() {
+    nohup "$@" >/dev/null 2>&1 </dev/null &
+}
+
+# Admits one refresher per key and turns the rest away.
+#
+# mkdir is the gate because it is atomic. A lock left behind by a refresher
+# that was killed outright would wedge its key for good, so one older than any
+# gathering could plausibly take is taken over rather than respected.
+LOCK_TTL=30s
+
+take_refresh_lock() {
+    _lock="$CACHE_DIR/.refresh-$1"
+    mkdir -p "$CACHE_DIR" 2>/dev/null
+    mkdir "$_lock" 2>/dev/null && return 0
+    [ -n "$(find "$_lock" -mtime "-$LOCK_TTL" -print -quit 2>/dev/null)" ] && return 1
+    rmdir "$_lock" 2>/dev/null
+    mkdir "$_lock" 2>/dev/null
+}
+
+release_refresh_lock() {
+    rmdir "$CACHE_DIR/.refresh-$1" 2>/dev/null
 }
 
 # Measuring and cutting a formatted string, both in the columns tmux gives it.

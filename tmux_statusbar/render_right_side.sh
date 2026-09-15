@@ -26,7 +26,17 @@ MIN_CENTER_WIDTH=50    # columns to always leave for the window-list "tabs".
                        # this session (raycast-telltale, run, zsh) needs 49
 RIGHT_PAD='  '         # kept clear at the end, so nothing touches the frame
 
-# --- Arguments from tmux ---
+# --- Arguments ---
+# A leading --refresh marks the gathering half of the split lib.sh describes.
+# tmux never runs that half, so what follows the flag is the same pair of
+# arguments tmux passes here.
+if [ "$1" = "--refresh" ]; then
+    refreshing=yes
+    shift
+else
+    refreshing=no
+fi
+
 session_name="$1"
 client_width="$2"
 
@@ -35,7 +45,26 @@ client_width="$2"
 # renders fresh rather than inheriting another one's width.
 CACHE_KEY="right-$session_name-$client_width"
 
-get_cache "$CACHE_KEY" && exit 0
+# Serving the bar is only ever a read, so this half finishes inside a frame
+# however slow the gathering below becomes. A stale answer is handed back as it
+# stands, with a refresh started behind it.
+#
+# A key with nothing cached yet has nothing to hand back, so the right side
+# stands empty until the first refresh lands. That shifts the window list for
+# one redraw, which is the whole cost of the split.
+if [ "$refreshing" = no ]; then
+    cache_is_fresh "$CACHE_KEY" || refresh_running "$CACHE_KEY" ||
+        refresh_detached "$0" --refresh "$session_name" "$client_width"
+    read_cache "$CACHE_KEY"
+    exit 0
+fi
+
+# --- Gathering ---
+# One refresher per key at a time. Several redraws land within a single
+# gathering, and each would otherwise fork its own.
+take_refresh_lock "$CACHE_KEY" || exit 0
+trap 'release_refresh_lock "$CACHE_KEY"; exit' HUP INT TERM
+trap 'release_refresh_lock "$CACHE_KEY"' EXIT
 
 # --- Logic ---
 
@@ -123,4 +152,7 @@ fi
 # A reset `#[default]` is used to ensure formatting doesn't leak.
 output=$(printf "%s%s#[default]" "$session_color" "$final_text")
 set_cache "$CACHE_KEY" "$output"
+
+# Detached, this goes nowhere. It is kept for the sake of running the gathering
+# by hand, which would otherwise show nothing for what it did.
 printf '%s' "$output"

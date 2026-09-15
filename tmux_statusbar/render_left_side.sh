@@ -27,6 +27,18 @@ session_name="$4"
 # reports it - pressing the prefix asks for a combination never rendered
 # before and therefore always renders fresh. Only the count of waiting
 # windows can lag, and it already moved at status-interval.
+#
+# So this side renders on the render path, and has to stay there. The right
+# side no longer does: gathering its content outlasts the gap between two
+# redraws, so tmux killed every renderer part way, and it now serves a stale
+# render and gathers behind it. That split cannot come here, because a key
+# never rendered before has nothing stale to serve - pressing the prefix would
+# show an empty block for a redraw where it should show TMUX.
+#
+# What keeps rendering here affordable is that nothing it does is slow: a
+# session colour and one list-windows, about 50ms against the 150ms of
+# spin_window_state.sh's FRAME_DELAY. A query costing appreciably more belongs
+# off this side altogether rather than behind a refresh.
 CACHE_KEY="left-$client_prefix-$pane_mode-$window_zoomed_flag-$session_name"
 
 get_cache "$CACHE_KEY" && exit 0
