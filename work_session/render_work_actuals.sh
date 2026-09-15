@@ -179,4 +179,6 @@ fi
 
 "$BLOCK" replace $block_opts ${lines[@]+"${lines[@]}"}
 
-$owns_copy && "$BLOCK" diff --date "$day" --work-file "$work_file"
+if $owns_copy; then
+    "$BLOCK" diff --date "$day" --work-file "$work_file"
+fi
