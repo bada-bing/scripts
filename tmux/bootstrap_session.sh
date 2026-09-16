@@ -49,19 +49,12 @@ tmux set-option -t "$SESSION_NAME" @layout "$layout"
 if [[ -n "$layout_script" ]]; then
     source "$layout_script"   # a layout script owns the session entirely
 else
-    # mprocs is keyed off the repository, not the session, so a session named for
-    # a task still finds its config.
-    repo_key=$(basename "$session_cwd" | tr . -)
-    mprocs_config="$LOCAL_ENV/mprocs/$repo_key.yaml"
-
-    tmux rename-window -t "$SESSION_NAME:1" "run"
-    if [[ -f "$mprocs_config" ]]; then
-        tmux send-keys -t "$SESSION_NAME:run" "$SCRIPT_DIR/ensure_single_mprocs.sh $mprocs_config" C-m
-    fi
+    # Processes are started on demand by proc, one window each, so the session
+    # carries no window for them. Index 1 is the assistant in every layout.
+    tmux rename-window -t "$SESSION_NAME:1" "assistant"
     # onefetch errors out when the directory is not a repository, which is the
     # normal case for a task falling back to tasks/<key>.
     tmux new-window -t "$SESSION_NAME:" -n "edit" -c "$session_cwd" "sh -c 'git rev-parse --git-dir >/dev/null 2>&1 && /opt/homebrew/bin/onefetch; exec $SHELL -l'"
-    tmux new-window -t "$SESSION_NAME:" -n "assistant" -c "$session_cwd"
 fi
 
 echo "$SESSION_NAME"

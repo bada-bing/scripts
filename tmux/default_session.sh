@@ -7,7 +7,6 @@ if ! tmux has-session -t=$SESSION_NAME 2>/dev/null; then
     tmux new-session -d -s $SESSION_NAME -c "$SESSION_PATH"
 
     tmux rename-window -t $SESSION_NAME:1 "assistant"
-    tmux new-window -t $SESSION_NAME -n "run" -c "$SESSION_PATH"
 fi
 
 if [ -z "$TMUX" ]; then
