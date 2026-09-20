@@ -13,9 +13,9 @@
 #   record_work.sh stop  [--dry-run]
 #   record_work.sh status
 #
-# The journal's "# Plan" is a hint, authored by hand and only ever read. Nothing
-# here writes a marker into it, so a marker cannot fall out of step with the
-# record - the open interval is the only claim about what is being worked on.
+# Nothing here writes into the journal's "# Errands". Whether an errand is done
+# is the errand CLI's business, and the open interval is the only claim this
+# makes about what is being worked on - so the two cannot fall out of step.
 #
 # Resolving the task goes first, because it is the only step that can
 # legitimately refuse; a failure there leaves nothing written anywhere else.

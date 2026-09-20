@@ -4,15 +4,22 @@
 # script that edits journal text, so a block's shape is defined in one place
 # rather than in every caller that wants to read or replace one.
 #
-# A journal holds two of them, and they flow in opposite directions:
+# A journal holds two blocks about work, and they answer different questions:
 #
-#   # Plan   hand-authored, the day's hint. It carries no state: being named in
-#            it is the whole of what it says. Read by the tooling, never written.
-#   # Work   the day's record, rendered from Timewarrior. Machine-owned:
-#            render_work_actuals.sh replaces it wholesale.
+#   # Errands  what got done today - small work too small to be a task, whether
+#              captured by hand, taken from the backlog or instantiated from a
+#              chore. Read and written both. Its order is the prioritisation, so
+#              nothing sorts it, and DONE on an entry says it was completed.
+#   # Work     where the time went, rendered from Timewarrior. Machine-owned:
+#              render_work_actuals.sh replaces it wholesale.
 #
-# Entries are addressed by task key - the ID prefix of the [[page]] link they
-# carry. Plain-text entries have no key: they are listed, never touched.
+# Neither is derivable from the other: an errand can take three intervals and not
+# be done, and it can be done with no interval at all.
+#
+# An entry is a top-level child of the block, and anything indented under it
+# belongs to it and travels with it. An entry is addressed by its exact text, or
+# by task key where it carries a [[page]] link - which is how # Work is rendered,
+# and what an errand only incidentally contains.
 #
 # Usage:
 #   journal_work_block.sh list                            [--block B] [--date D]
@@ -22,9 +29,9 @@
 #   journal_work_block.sh replace  <line>...               [--block B] [--date D]
 #   journal_work_block.sh diff                             [--date D]
 #
-# --block defaults to Plan, the block a person edits. --date defaults to today.
-# list prints TSV: marker, key, annotation, text - the marker column is empty for
-# anything written since the hint stopped carrying state.
+# --block defaults to Errands, the block a person edits. --date defaults to today.
+# list prints TSV: marker, key, annotation, text - the marker column is empty on
+# anything but a completed errand.
 #
 # Dry runs work by applying the real edits to a working copy and diffing it
 # against the journal, so what is shown is what would happen - not a guess.
@@ -46,7 +53,7 @@ shift || true
 
 date_arg=""
 work_file=""
-block="Plan"
+block="Errands"
 dry_run=false
 args=()
 while [[ $# -gt 0 ]]; do
@@ -60,7 +67,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$block" ]]; then
-    echo "Error: --block needs a heading name, e.g. Plan or Work" >&2
+    echo "Error: --block needs a heading name, e.g. Errands or Work" >&2
     exit 1
 fi
 

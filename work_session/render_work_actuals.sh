@@ -14,7 +14,7 @@
 #
 # One-way and machine-owned. The block is replaced whole on every run, so a
 # corrected or deleted interval is reflected simply by running this again, and
-# nothing hand-written survives there - intent belongs in "# Plan".
+# nothing hand-written survives there - the day's errands belong in "# Errands".
 #
 # Entries are ordered by when the work started, so the block reads as the day did.
 #
