@@ -25,6 +25,8 @@
 #   journal_work_block.sh list                            [--block B] [--date D]
 #   journal_work_block.sh annotate <key> <text>            [--block B] [--date D]
 #   journal_work_block.sh add      <text>                  [--block B] [--date D]
+#   journal_work_block.sh add      < block                 [--block B] [--date D]
+#   journal_work_block.sh mark     <key-or-exact-text>     [--block B] [--date D]
 #   journal_work_block.sh remove   <key-or-exact-text>     [--block B] [--date D]
 #   journal_work_block.sh replace  <line>...               [--block B] [--date D]
 #   journal_work_block.sh diff                             [--date D]
@@ -165,6 +167,14 @@ function entry_for_key(l, key,   at, rest) {
     rest = substr(l, at + length(key) + 2, 1)
     return (rest == "]" || rest == "-")
 }
+
+# An entry with no [[page]] is addressed by its text - which is an errand's
+# identity, so the marker is stripped off before comparing.
+function entry_text(l) {
+    sub(/^\t- /, "", l)
+    sub(/^(LATER|NOW|DONE) /, "", l)
+    return l
+}
 PRELUDE
 
 # True when the file's last byte is a newline. Command substitution strips
@@ -272,22 +282,51 @@ case "$verb" in
         ;;
 
     add)
+        # Two inputs, matching the errand backlog's. An argument is one entry's
+        # text and gets the bullet and the indent it needs; a block on stdin is an
+        # entry written out with its subtree, and is indented one level into the
+        # block. Either way the text itself is carried verbatim, marker included
+        # if the caller wrote one - which is how an entry with no [[page]] to look
+        # up gets moved from one day to another.
+        #
+        # Lines are joined on a unit separator rather than newlines, since awk's
+        # -v cannot carry one.
+        us=$'\x1f'
         text="${args[0]:-}"
-        if [[ -z "$text" ]]; then
-            echo "Usage: $(basename "$0") add <text>" >&2
-            exit 1
+        if [[ -n "$text" ]]; then
+            lines=$'\t- '"${text#- }"
+        else
+            # Not "block": that name is taken by the heading this script edits.
+            piped=$(cat)
+            if [[ -z "$piped" ]]; then
+                echo "Usage: $(basename "$0") add <text>   (or pipe the block in)" >&2
+                exit 1
+            fi
+            if [[ "$piped" != "- "* ]]; then
+                echo "Error: a piped block must open with a top-level bullet" >&2
+                printf '  got: %s\n' "$(head -1 <<< "$piped")" >&2
+                exit 1
+            fi
+            lines=""
+            while IFS= read -r line; do
+                [[ -n "$lines" ]] && lines+="$us"
+                lines+=$'\t'"$line"
+            done <<< "$piped"
         fi
-        # Verbatim, marker included if the caller wrote one - this is how an
-        # entry with no [[page]] to look up gets carried from one day to another.
+
         transform '
+            function emit(   n, i, a) {
+                n = split(lines, a, SEP)
+                for (i = 1; i <= n; i++) print a[i]
+            }
             is_heading($0) { inblock = 1; print; next }
             inblock && is_top_level($0) {
-                if (!added) { print "\t- " text; added = 1 }
+                if (!added) { emit(); added = 1 }
                 inblock = 0
             }
             { print }
-            END { if (inblock && !added) print "\t- " text }
-        ' -v text="$text"
+            END { if (inblock && !added) emit() }
+        ' -v lines="$lines" -v SEP="$us"
         ;;
 
     replace)
@@ -324,6 +363,37 @@ case "$verb" in
         ' -v lines="$lines" -v SEP="$us"
         ;;
 
+    mark)
+        # Completion, written where the errand sits. Idempotent, so completing
+        # something twice is not an error - but an entry that is not there is a
+        # typo rather than a no-op, since the text is the errand's identity.
+        key="${args[0]:-}"
+        if [[ -z "$key" ]]; then
+            echo "Usage: $(basename "$0") mark <key-or-exact-text>" >&2
+            exit 1
+        fi
+        have_block || { printf 'Error: no %s block on %s\n' "$block" "$day" >&2; exit 1; }
+
+        if ! "$0" list --block "$block" --date "$day" \
+                ${work_file:+--work-file "$work_file"} \
+             | awk -F'\t' -v k="$key" '$4 == k || $2 == k { found = 1 }
+                                       END { exit !found }'; then
+            printf 'Error: no entry in %s on %s: %s\n' "$block" "$day" "$key" >&2
+            exit 1
+        fi
+
+        transform '
+            is_heading($0) { inblock = 1; print; next }
+            inblock && is_top_level($0) { inblock = 0 }
+            inblock && is_entry($0) && (entry_for_key($0, key) || entry_text($0) == key) {
+                if (marker_of($0) == "DONE") { print; next }
+                sub(/^\t- /, "\t- DONE ")
+                print; next
+            }
+            { print }
+        ' -v key="$key"
+        ;;
+
     remove)
         key="${args[0]:-}"
         if [[ -z "$key" ]]; then
@@ -336,11 +406,6 @@ case "$verb" in
         # be keyed by. Anything indented under the entry belongs to it and goes
         # too.
         transform '
-            function entry_text(l) {
-                sub(/^\t- /, "", l)
-                sub(/^(LATER|NOW|DONE) /, "", l)
-                return l
-            }
             is_heading($0) { inblock = 1; print; next }
             inblock && is_top_level($0) { inblock = 0 }
             inblock && is_entry($0) && (entry_for_key($0, key) || entry_text($0) == key) { skip = 1; next }
