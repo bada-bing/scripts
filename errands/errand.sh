@@ -25,6 +25,7 @@
 #   errand.sh capture --backlog < block
 #   errand.sh pop                        the first backlog errand, into today
 #   errand.sh complete <text>            mark it DONE in today's block
+#   errand.sh add-chores                 every chore due today, into today
 #
 # An errand with subitems is written as a block and appended verbatim, which is
 # the one format both places take:
@@ -60,6 +61,18 @@
 # asymmetry is deliberate: work stop still completes nothing, because stopping
 # means you stepped away, not that you are done.
 #
+# add-chores instantiates every chore due today. A chore is a class and the
+# errand it becomes is an instance, so from that moment nothing distinguishes it
+# from one captured by hand: it is worked, completed and swept the same way.
+#
+# A chore already in today's block is skipped, so running add-chores twice is
+# running it once and nothing has to remember whether it ran. That is not
+# tidiness: an errand is addressed by its exact text and a mark lands on every
+# entry matching it, so two identical lines could never be completed apart. A
+# chore wanted twice in a day is two chores, and two labels - "Check the activity
+# feed 12h" and "Check the activity feed 16h" - which keeps them apart in the
+# record too.
+#
 # Un-completing is not here. Deleting the DONE that complete wrote is a judgement
 # made while reading the block, and rare enough that a verb would cost more than
 # it saves.
@@ -78,6 +91,7 @@ set -uo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 JOURNAL="$SCRIPT_DIR/../work_session/journal_work_block.sh"
 BACKLOG="$SCRIPT_DIR/errand_backlog.sh"
+CHORES="$SCRIPT_DIR/errand_chores.sh"
 ACTIVE="$SCRIPT_DIR/../work_session/get_active_identity.sh"
 RECORD="$SCRIPT_DIR/../work_session/record_work.sh"
 
@@ -88,7 +102,7 @@ usage() {
 # True when today's "# Errands" holds an entry with exactly this text. list
 # prints marker, key, annotation, text, so the text is the fourth field.
 today_has() {
-    "$JOURNAL" list \
+    "$JOURNAL" list "${@:2}" \
         | awk -F'\t' -v t="$1" '$4 == t { found = 1 } END { exit !found }'
 }
 
@@ -254,6 +268,51 @@ case "$verb" in
         # Marked last: a mark that does not land leaves an errand still open with
         # its clock stopped, which running complete again puts right.
         "$JOURNAL" mark "$text" ${opts[@]+"${opts[@]}"} || exit 1
+        ;;
+
+    add-chores)
+        dry_run=false
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --dry-run) dry_run=true; shift ;;
+                -*)
+                    echo "Error: unknown option '$1'" >&2
+                    usage >&2
+                    exit 1
+                    ;;
+                *)
+                    echo "Error: add-chores takes no argument" >&2
+                    exit 1
+                    ;;
+            esac
+        done
+
+        due=$("$CHORES" due) || exit 1
+        if [[ -z "$due" ]]; then
+            echo "No chore is due today" >&2
+            exit 0
+        fi
+
+        # A dry run threads every chore through one working copy, so the diff
+        # shows the day as all of them together would leave it rather than each
+        # one against the journal as it stands.
+        block_opts=()
+        if $dry_run; then
+            work_file=$(mktemp -u "${TMPDIR:-/tmp}/errand-add-chores.XXXXXX")
+            block_opts=(--work-file "$work_file")
+            trap '[[ -n "${work_file:-}" ]] && rm -f "$work_file"' EXIT
+        fi
+
+        while IFS= read -r label; do
+            [[ -n "$label" ]] || continue
+            today_has "$label" ${block_opts[@]+"${block_opts[@]}"} && continue
+            "$JOURNAL" add "$label" ${block_opts[@]+"${block_opts[@]}"} || exit 1
+            printf '%s\n' "$label"
+        done <<< "$due"
+
+        if $dry_run; then
+            "$JOURNAL" diff ${block_opts[@]+"${block_opts[@]}"}
+        fi
         ;;
 
     *)
