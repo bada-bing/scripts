@@ -24,6 +24,7 @@
 #   errand.sh capture --backlog <text>   into SOA/Errands instead
 #   errand.sh capture --backlog < block
 #   errand.sh pop                        the first backlog errand, into today
+#   errand.sh complete <text>            mark it DONE in today's block
 #
 # An errand with subitems is written as a block and appended verbatim, which is
 # the one format both places take:
@@ -48,6 +49,21 @@
 # fails, the write is taken back and the day is left as it was found. So a pop
 # either moves the errand or changes nothing, and never loses it.
 #
+# complete marks an errand DONE where it stands and leaves everything nested
+# under it as it is. The entry stays in the block: what becomes of it is decided
+# once, at the day's sweep, over the whole block rather than an entry at a time.
+#
+# It closes the open Timewarrior interval when that interval is this errand, and
+# touches the clock in no other case. Finishing an errand while its clock runs is
+# the failure work already guards against - an interval forgotten about is
+# invisible, and a sitting meant to be twenty minutes becomes three hours. The
+# asymmetry is deliberate: work stop still completes nothing, because stopping
+# means you stepped away, not that you are done.
+#
+# Un-completing is not here. Deleting the DONE that complete wrote is a judgement
+# made while reading the block, and rare enough that a verb would cost more than
+# it saves.
+#
 # Capture takes no date. An errand says what to do and never when, so there is no
 # day to name but today's; anything that has to happen at a time is a reminder.
 #
@@ -62,6 +78,8 @@ set -uo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 JOURNAL="$SCRIPT_DIR/../work_session/journal_work_block.sh"
 BACKLOG="$SCRIPT_DIR/errand_backlog.sh"
+ACTIVE="$SCRIPT_DIR/../work_session/get_active_identity.sh"
+RECORD="$SCRIPT_DIR/../work_session/record_work.sh"
 
 usage() {
     sed -n '/^# Usage:/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'
@@ -196,6 +214,46 @@ case "$verb" in
         fi
 
         printf '%s\n' "$block"
+        ;;
+
+    complete)
+        opts=()
+        args=()
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --dry-run) opts+=("$1"); shift ;;
+                -*)
+                    echo "Error: unknown option '$1'" >&2
+                    usage >&2
+                    exit 1
+                    ;;
+                *) args+=("$1"); shift ;;
+            esac
+        done
+
+        text="${args[0]:-}"
+        if [[ -z "$text" || ${#args[@]} -gt 1 ]]; then
+            echo "Error: complete takes one errand's exact text, quoted" >&2
+            exit 1
+        fi
+
+        # Refused before the clock is touched, so a mistyped errand stops nothing.
+        if ! today_has "$text"; then
+            printf "Error: today has no errand reading: %s\n" "$text" >&2
+            echo "  the text must match the entry in # Errands exactly" >&2
+            exit 1
+        fi
+
+        # Only when the open interval is this errand. An interval on anything
+        # else is someone else's work in progress and is left running.
+        IFS=$'\t' read -r kind label < <("$ACTIVE" || true)
+        if [[ "${kind:-}" == "adhoc" && "${label:-}" == "$text" ]]; then
+            "$RECORD" stop ${opts[@]+"${opts[@]}"} || exit 1
+        fi
+
+        # Marked last: a mark that does not land leaves an errand still open with
+        # its clock stopped, which running complete again puts right.
+        "$JOURNAL" mark "$text" ${opts[@]+"${opts[@]}"} || exit 1
         ;;
 
     *)
