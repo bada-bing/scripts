@@ -205,7 +205,14 @@ $program" "$target" > "$updated"; then
 
     # Written through the same inode, so Logseq's watcher sees a modification
     # rather than a replacement and the file keeps its permissions.
-    cat "$updated" > "$target"
+    #
+    # A failed write is reported: a caller that moves an errand here from
+    # somewhere else deletes it there once this returns, so silence would lose it.
+    if ! cat "$updated" > "$target"; then
+        printf 'Error: could not write %s\n' "$target" >&2
+        rm -f "$updated"
+        return 1
+    fi
     rm -f "$updated"
 
     if ! $had_newline && ends_with_newline "$target"; then

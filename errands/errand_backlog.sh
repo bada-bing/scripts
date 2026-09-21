@@ -125,7 +125,14 @@ commit() {
 
     # Written through the same inode, so Logseq's watcher sees a modification
     # rather than a replacement and the file keeps its permissions.
-    cat "$produced" > "$file"
+    #
+    # A failed write is reported: pop prints the errand it took, and a caller
+    # storing that output would otherwise hold an errand this page still has.
+    if ! cat "$produced" > "$file"; then
+        printf 'Error: could not write %s\n' "$file" >&2
+        rm -f "$produced"
+        return 1
+    fi
     rm -f "$produced"
     if ! $had_newline && ends_with_newline "$file"; then
         truncate -s -1 "$file"
@@ -202,7 +209,7 @@ case "$verb" in
             skip                     { next }
             { print }
         ' "$file" > "$produced" || { rm -f "$produced"; exit 1; }
-        commit "$produced"
+        commit "$produced" || exit 1
         printf '%s\n' "$block"
         ;;
 
