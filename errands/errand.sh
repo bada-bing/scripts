@@ -23,6 +23,7 @@
 #   errand.sh capture < block            the same, with the errand's subtree
 #   errand.sh capture --backlog <text>   into SOA/Errands instead
 #   errand.sh capture --backlog < block
+#   errand.sh pop                        the first backlog errand, into today
 #
 # An errand with subitems is written as a block and appended verbatim, which is
 # the one format both places take:
@@ -36,6 +37,16 @@
 #
 # Quote the heredoc marker so the shell leaves the text alone, and indent with a
 # real tab - <<-EOF strips leading tabs and would leave two errands, not one.
+#
+# pop takes the first errand in the backlog and only the first. The page is
+# hand-ordered and that order is the prioritisation, so the head is by definition
+# what comes next and there is nothing to choose. Three errands means running it
+# three times.
+#
+# A move is all or nothing. The errand is written into the journal first and
+# removed from the backlog only once that has worked; if anything after the write
+# fails, the write is taken back and the day is left as it was found. So a pop
+# either moves the errand or changes nothing, and never loses it.
 #
 # Capture takes no date. An errand says what to do and never when, so there is no
 # day to name but today's; anything that has to happen at a time is a reminder.
@@ -54,6 +65,25 @@ BACKLOG="$SCRIPT_DIR/errand_backlog.sh"
 
 usage() {
     sed -n '/^# Usage:/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# True when today's "# Errands" holds an entry with exactly this text. list
+# prints marker, key, annotation, text, so the text is the fourth field.
+today_has() {
+    "$JOURNAL" list \
+        | awk -F'\t' -v t="$1" '$4 == t { found = 1 } END { exit !found }'
+}
+
+# Takes back the journal write, so a move that cannot be finished leaves the day
+# as it found it. Verified rather than assumed: remove reports nothing when it
+# matches nothing, and an entry left behind is a line the reader has to know about.
+undo_journal() {
+    "$JOURNAL" remove "$1"
+    if today_has "$1"; then
+        printf 'Error: could not take it back out of today; delete by hand: %s\n' "$1" >&2
+        return 1
+    fi
+    printf 'The errand is back in the backlog and out of today: %s\n' "$1" >&2
 }
 
 verb="${1:-}"
@@ -96,6 +126,76 @@ case "$verb" in
         else
             exec "$JOURNAL" add ${args[0]+"${args[0]}"} ${opts[@]+"${opts[@]}"}
         fi
+        ;;
+
+    pop)
+        dry_run=false
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --dry-run) dry_run=true; shift ;;
+                -*)
+                    echo "Error: unknown option '$1'" >&2
+                    usage >&2
+                    exit 1
+                    ;;
+                *)
+                    echo "Error: pop takes no argument; it takes the first errand" >&2
+                    exit 1
+                    ;;
+            esac
+        done
+
+        # Read first. peek leaves the page as it is, so nothing has happened yet
+        # if any of the checks below refuse.
+        block=$("$BACKLOG" peek) || exit 1
+        text=$(head -1 <<< "$block"); text="${text#- }"
+
+        # An errand is addressed by its exact text, so a second entry reading the
+        # same thing would be indistinguishable from this one - to the revert
+        # below, and afterwards to errand complete. Refused rather than resolved:
+        # which of two identical lines was meant is not a question to guess at.
+        if today_has "$text"; then
+            printf 'Error: today already has an errand reading: %s\n' "$text" >&2
+            echo "  two entries with one text could not be told apart" >&2
+            exit 1
+        fi
+
+        if $dry_run; then
+            # One diff says both: the block added to the journal is exactly the
+            # block the backlog loses, so a second diff would restate it.
+            printf '%s\n' "$block" | "$JOURNAL" add --dry-run
+            exit $?
+        fi
+
+        # Write, then delete. Up to here nothing has changed, so a refusal costs
+        # nothing; past here every failure is undone before returning.
+        printf '%s\n' "$block" | "$JOURNAL" add || exit 1
+
+        # The backlog is read again before anything is removed from it, so pop
+        # can only ever take the errand that was written into the journal.
+        if ! check=$("$BACKLOG" peek) || [[ "$check" != "$block" ]]; then
+            echo "Error: the backlog changed while the errand was being moved" >&2
+            undo_journal "$text"
+            exit 1
+        fi
+
+        if ! popped=$("$BACKLOG" pop); then
+            echo "Error: the errand could not be removed from the backlog" >&2
+            undo_journal "$text"
+            exit 1
+        fi
+
+        # pop reports what it took, so this asserts what the check above already
+        # established. It has nothing left to undo - the page is written - so it
+        # prints what was removed rather than dropping it.
+        if [[ "$popped" != "$block" ]]; then
+            echo "Error: the backlog removed an errand other than this one:" >&2
+            printf '%s\n' "$popped" >&2
+            undo_journal "$text"
+            exit 1
+        fi
+
+        printf '%s\n' "$block"
         ;;
 
     *)
