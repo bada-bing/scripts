@@ -13,7 +13,7 @@
 #   work.sh                              report the open interval
 #   work.sh start [<what>] [<time>]      pick when nothing is given
 #   work.sh start "<label>"              work with no task, labelled in words
-#   work.sh log <what> <time> <duration> record work already finished
+#   work.sh log <what> <time> <duration> [--date D]  record finished work
 #   work.sh stop                         close the interval, render the day
 #   work.sh render [<day>]               render a day's record again
 
@@ -30,6 +30,7 @@ Usage:
   work start <what> 16:00     start it, backdated to that time
   work start "<label>"        record work that has no task, under that label
   work log <what> 16:00 2h    record work already finished, opening nothing
+  work log <what> 9:06 1h40m --date 2026-09-19   write up another day
   work stop                   close the interval and render the day
   work render [<day>]         render a day's record again from Timewarrior
 

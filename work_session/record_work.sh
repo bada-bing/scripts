@@ -10,7 +10,7 @@
 #
 # Usage:
 #   record_work.sh start <what> [<time>] [--dry-run]
-#   record_work.sh log   <what> <time> <duration> [--dry-run]
+#   record_work.sh log   <what> <time> <duration> [--date D] [--dry-run]
 #   record_work.sh stop  [--dry-run]
 #   record_work.sh status
 #
@@ -18,7 +18,9 @@
 # meant is said rather than inferred from whether a duration happens to be there.
 # log opens nothing: it needs no session, it is not refused by an interval running
 # now, and it renders the day itself - forgetting to log this morning is what it
-# is for.
+# is for. --date puts it on another day, which is how a day that went unrecorded
+# is written up afterwards; start takes no --date, since an interval it opens can
+# only run from now.
 #
 # Nothing here writes into the journal's "# Errands". Whether an errand is done
 # is the errand CLI's business, and the open interval is the only claim this
@@ -38,10 +40,12 @@ dry_run=false
 key=""
 at=""
 duration=""
+on=""
 words=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) dry_run=true ;;
+        --date)    on="${2:-}"; shift ;;
         -*)        echo "Error: unknown option $1" >&2; exit 1 ;;
         *)         case "$words" in
                        0) key="$1" ;;
@@ -62,11 +66,22 @@ if [[ "$words" -gt 3 ]]; then
     exit 1
 fi
 
+if [[ -n "$on" && ! "$on" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    printf "Error: --date must be YYYY-MM-DD, got '%s'\n" "$on" >&2
+    exit 1
+fi
+day="${on:-$(date '+%Y-%m-%d')}"
+
 if [[ -n "$at" && ! "$at" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
     printf "Error: '%s' is not a time like 16:00\n" "$at" >&2
     echo "  a label of several words needs quoting" >&2
     exit 1
 fi
+
+# Zero-padded, because the hour is pasted onto a date to make an ISO stamp and
+# Timewarrior misreads "2026-09-19T9:00" rather than refusing it - which surfaced
+# as a phantom overlap against an empty day.
+[[ -n "$at" ]] && at=$(printf '%02d:%s' "$((10#${at%%:*}))" "${at##*:}")
 
 # Hours and minutes, spelled h and m, and nothing else - the shape the journal
 # already uses. Every other spelling is refused rather than interpreted, because
@@ -166,9 +181,9 @@ key_shaped() {
 # the current time - "09:00" would become 09:00:09 and match nothing.
 interval_id_starting_at() {
     local epoch stamp
-    epoch=$(date -j -f '%Y-%m-%d %H:%M:%S' "$(date '+%Y-%m-%d') $1:00" '+%s') || return 1
+    epoch=$(date -j -f '%Y-%m-%d %H:%M:%S' "$day $1:00" '+%s') || return 1
     stamp=$(date -u -r "$epoch" '+%Y%m%dT%H%M%SZ') || return 1
-    timew export today 2>/dev/null \
+    timew export "$day" - "$(date -j -v+1d -f '%Y-%m-%d' "$day" '+%Y-%m-%d')" 2>/dev/null \
         | jq -r --arg s "$stamp" 'map(select(.start == $s)) | .[0].id // empty'
 }
 
@@ -178,12 +193,13 @@ interval_id_starting_at() {
 # recorded, which is the one thing the record must never do quietly.
 report_overlaps() {
     local from="$1" mins="$2" s e
-    s=$(date -j -f '%Y-%m-%d %H:%M:%S' "$(date '+%Y-%m-%d') $from:00" '+%s') || return 0
+    s=$(date -j -f '%Y-%m-%d %H:%M:%S' "$day $from:00" '+%s') || return 0
     e=$((s + mins * 60))
 
     # jq compares in epoch seconds; the clock times are formatted here, because
     # Timewarrior stores UTC and these are read by someone thinking in local time.
-    timew export today 2>/dev/null | jq -r --argjson s "$s" --argjson e "$e" '
+    timew export "$day" - "$(date -j -v+1d -f '%Y-%m-%d' "$day" '+%Y-%m-%d')" 2>/dev/null \
+        | jq -r --argjson s "$s" --argjson e "$e" '
         def stamp: strptime("%Y%m%dT%H%M%SZ") | mktime;
         def what: .annotation
                 // ([.tags[]? | select(startswith("%"))] | first | if . then .[1:] else null end)
@@ -218,6 +234,11 @@ case "$verb" in
             if [[ -z "$key" ]]; then
                 echo "Usage: $(basename "$0") start <what> [<time>]" >&2
                 echo "  to pick one: work start" >&2
+                exit 1
+            fi
+            if [[ -n "$on" ]]; then
+                echo "Error: start opens an interval now and takes no --date" >&2
+                echo "  to write up a past day: work log <what> <time> <duration> --date $on" >&2
                 exit 1
             fi
             if [[ -n "$duration" ]]; then
@@ -268,7 +289,7 @@ case "$verb" in
             # call - and a failure there takes the interval away again rather than
             # leaving work recorded that nothing can name.
             if $past; then
-                if ! run timew track "$at" for "$duration" :yes >/dev/null; then
+                if ! run timew track "${day}T${at}" for "$duration" :yes >/dev/null; then
                     report_overlaps "$at" "$minutes"
                     exit 1
                 fi
@@ -280,7 +301,7 @@ case "$verb" in
                         exit 1
                     fi
                 fi
-                "$SCRIPT_DIR/render_work_actuals.sh" $render_opts
+                "$SCRIPT_DIR/render_work_actuals.sh" "$day" $render_opts
                 printf 'recorded: %s at %s for %s\n' "$key" "$at" "$duration_said"
                 exit 0
             fi
@@ -306,11 +327,11 @@ case "$verb" in
         # Past work needs no session: there is nowhere to go back to, and the day's
         # record is the only thing that has to change.
         if $past; then
-            if ! run timew track "$at" for "$duration" "${tags[@]}" :yes >/dev/null; then
+            if ! run timew track "${day}T${at}" for "$duration" "${tags[@]}" :yes >/dev/null; then
                 report_overlaps "$at" "$minutes"
                 exit 1
             fi
-            "$SCRIPT_DIR/render_work_actuals.sh" $render_opts
+            "$SCRIPT_DIR/render_work_actuals.sh" "$day" $render_opts
             printf 'recorded: %s at %s for %s\n' "$key" "$at" "$duration_said"
             exit 0
         fi
@@ -348,7 +369,7 @@ case "$verb" in
 
         # Closing the interval before rendering means the actuals include it.
         run timew stop :yes >/dev/null || exit 1
-        "$SCRIPT_DIR/render_work_actuals.sh" $render_opts
+        "$SCRIPT_DIR/render_work_actuals.sh" "$day" $render_opts
 
         # Stopping records that the work happened and nothing more. Whether it is
         # finished is a separate, deliberate act, in Taskwarrior and on its page.
