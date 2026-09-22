@@ -78,8 +78,17 @@ case "$verb" in
         selection=$("$SCRIPT_DIR/select_work.sh" --tasks) || exit 1
         [[ -z "$selection" ]] && exit 0
 
-        IFS=$'\t' read -r _ key <<< "$selection"
+        IFS=$'\t' read -r kind key <<< "$selection"
         [[ -z "$key" ]] && exit 0
+
+        # The picker shows a task reference in the journal dimmed, so honouring
+        # that here is what makes the row mean what it says. Starting the task is
+        # still a keystroke away, and saying which one is the whole of the answer.
+        if [[ "$kind" == "unstartable" ]]; then
+            printf 'Error: %s is a task reference, not an errand\n' "$key" >&2
+            printf '  tasks are not started from the day block: work start %s\n' "$key" >&2
+            exit 1
+        fi
 
         exec "$SCRIPT_DIR/record_work.sh" start "$key" "$@"
         ;;
