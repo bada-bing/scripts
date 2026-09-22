@@ -26,6 +26,7 @@
 #   errand.sh pop                        the first backlog errand, into today
 #   errand.sh complete <text>            mark it DONE in today's block
 #   errand.sh add-chores                 every chore due today, into today
+#   errand.sh rename <old> <new>         change an errand's text everywhere
 #
 # An errand with subitems is written as a block and appended verbatim, which is
 # the one format both places take:
@@ -73,6 +74,18 @@
 # feed 12h" and "Check the activity feed 16h" - which keeps them apart in the
 # record too.
 #
+# rename changes an errand's text, which is its identity, so it is written in two
+# stores at once: the entry in the day block and the annotation on every interval
+# recorded against it. Changing one alone breaks both - complete would no longer
+# find the running interval, and the record would keep the old wording. A task
+# needs none of this, since its identity is %<key> and its label is resolved from
+# the page when the day is rendered.
+#
+# The block is renamed first and the record follows it, which is the direction the
+# two already run in: an interval takes its label from the errand. If any interval
+# refuses, the ones already changed and the block are put back, so a rename either
+# happens whole or changes nothing.
+#
 # Un-completing is not here. Deleting the DONE that complete wrote is a judgement
 # made while reading the block, and rare enough that a verb would cost more than
 # it saves.
@@ -94,6 +107,7 @@ BACKLOG="$SCRIPT_DIR/errand_backlog.sh"
 CHORES="$SCRIPT_DIR/errand_chores.sh"
 ACTIVE="$SCRIPT_DIR/../work_session/get_active_identity.sh"
 RECORD="$SCRIPT_DIR/../work_session/record_work.sh"
+RENDER="$SCRIPT_DIR/../work_session/render_work_actuals.sh"
 
 usage() {
     sed -n '/^# Usage:/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'
@@ -313,6 +327,97 @@ case "$verb" in
         if $dry_run; then
             "$JOURNAL" diff ${block_opts[@]+"${block_opts[@]}"}
         fi
+        ;;
+
+    rename)
+        dry_run=false
+        args=()
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --dry-run) dry_run=true; shift ;;
+                -*)
+                    echo "Error: unknown option '$1'" >&2
+                    usage >&2
+                    exit 1
+                    ;;
+                *) args+=("$1"); shift ;;
+            esac
+        done
+
+        old_text="${args[0]:-}"
+        new_text="${args[1]:-}"
+        if [[ -z "$old_text" || -z "$new_text" || ${#args[@]} -gt 2 ]]; then
+            echo "Error: rename takes the errand as it reads now, then as it should read" >&2
+            exit 1
+        fi
+        if [[ "$old_text" == "$new_text" ]]; then
+            echo "Error: the two texts are the same" >&2
+            exit 1
+        fi
+
+        if ! today_has "$old_text"; then
+            printf 'Error: today has no errand reading: %s\n' "$old_text" >&2
+            exit 1
+        fi
+        # Renaming onto an errand already there would leave two entries with one
+        # identity, which nothing afterwards could tell apart.
+        if today_has "$new_text"; then
+            printf 'Error: today already has an errand reading: %s\n' "$new_text" >&2
+            exit 1
+        fi
+
+        # Every interval, not only the one running: a closed sitting left under
+        # the old annotation would split away into a record entry of its own.
+        # A while-read rather than readarray: macOS ships bash 3.2, where the
+        # latter is not a builtin and fails silently enough to rename one store
+        # and not the other.
+        recorded=()
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && recorded+=("$line")
+        done < <(
+            timew export :all 2>/dev/null \
+                | jq -r --arg a "$old_text" '.[] | select(.annotation == $a) | [.id, .start] | @tsv'
+        )
+
+        # The block first: an interval takes its label from the errand, so that
+        # is the direction the rename runs in too.
+        "$JOURNAL" rename "$old_text" "$new_text" $($dry_run && echo --dry-run) || exit 1
+
+        days=()
+        renamed=()
+        for entry in ${recorded[@]+"${recorded[@]}"}; do
+            [[ -n "$entry" ]] || continue
+            IFS=$'\t' read -r id start <<< "$entry"
+
+            if $dry_run; then
+                printf 'would: timew annotate @%s "%s"\n' "$id" "$new_text" >&2
+            elif ! timew annotate "@$id" "$new_text" :yes >/dev/null; then
+                printf 'Error: interval @%s could not be re-annotated\n' "$id" >&2
+                # Put back what has already moved, the block included, so the
+                # errand is left under one text rather than under two.
+                for done_id in ${renamed[@]+"${renamed[@]}"}; do
+                    timew annotate "@$done_id" "$old_text" :yes >/dev/null \
+                        || printf 'Error: interval @%s is stuck on the new text\n' "$done_id" >&2
+                done
+                if "$JOURNAL" rename "$new_text" "$old_text"; then
+                    printf 'Nothing was renamed: %s\n' "$old_text" >&2
+                else
+                    printf 'Error: the block still reads: %s\n' "$new_text" >&2
+                fi
+                exit 1
+            fi
+            renamed+=("$id")
+
+            # Timewarrior stamps UTC and a journal day is local, so an evening
+            # sitting belongs to the day it felt like, not the day it stores as.
+            epoch=$(date -j -u -f '%Y%m%dT%H%M%SZ' "$start" '+%s' 2>/dev/null) || continue
+            day=$(date -r "$epoch" '+%Y-%m-%d')
+            [[ " ${days[*]-} " == *" $day "* ]] || days+=("$day")
+        done
+
+        for day in ${days[@]+"${days[@]}"}; do
+            "$RENDER" "$day" $($dry_run && echo --dry-run) >/dev/null || exit 1
+        done
         ;;
 
     *)

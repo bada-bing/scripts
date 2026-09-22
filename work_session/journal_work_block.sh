@@ -27,6 +27,7 @@
 #   journal_work_block.sh add      <text>                  [--block B] [--date D]
 #   journal_work_block.sh add      < block                 [--block B] [--date D]
 #   journal_work_block.sh mark     <key-or-exact-text>     [--block B] [--date D]
+#   journal_work_block.sh rename   <exact-text> <new-text> [--block B] [--date D]
 #   journal_work_block.sh remove   <key-or-exact-text>     [--block B] [--date D]
 #   journal_work_block.sh replace  <line>...               [--block B] [--date D]
 #   journal_work_block.sh diff                             [--date D]
@@ -402,6 +403,38 @@ case "$verb" in
             }
             { print }
         ' -v key="$key"
+        ;;
+
+    rename)
+        key="${args[0]:-}"
+        new_text="${args[1]:-}"
+        if [[ -z "$key" || -z "$new_text" ]]; then
+            echo "Usage: $(basename "$0") rename <exact-text> <new-text>" >&2
+            exit 1
+        fi
+        have_block || { printf 'Error: no %s block on %s\n' "$block" "$day" >&2; exit 1; }
+
+        # A substitution on the one line, never a remove and an add: the entry
+        # keeps its place, which is the prioritisation, and its subtree with it.
+        # The marker is kept for the same reason - renaming says nothing about
+        # whether the errand is done.
+        if ! "$0" list --block "$block" --date "$day" \
+                ${work_file:+--work-file "$work_file"} \
+             | awk -F'\t' -v k="$key" '$4 == k { found = 1 } END { exit !found }'; then
+            printf 'Error: no entry in %s on %s: %s\n' "$block" "$day" "$key" >&2
+            exit 1
+        fi
+
+        transform '
+            is_heading($0) { inblock = 1; print; next }
+            inblock && is_top_level($0) { inblock = 0 }
+            inblock && is_entry($0) && entry_text($0) == key {
+                marker = marker_of($0)
+                printf "\t- %s%s\n", (marker == "" ? "" : marker " "), replacement
+                next
+            }
+            { print }
+        ' -v key="$key" -v replacement="$new_text"
         ;;
 
     remove)
