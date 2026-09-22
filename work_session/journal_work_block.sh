@@ -18,8 +18,8 @@
 #
 # An entry is a top-level child of the block, and anything indented under it
 # belongs to it and travels with it. An entry is addressed by its exact text, or
-# by task key where it carries a [[page]] link - which is how # Work is rendered,
-# and what an errand only incidentally contains.
+# by task key where it opens with a [[page]] link - which is how # Work is
+# rendered. A link further along the text is part of what the entry says.
 #
 # Usage:
 #   journal_work_block.sh list                            [--block B] [--date D]
@@ -242,8 +242,11 @@ case "$verb" in
                 marker = marker_of($0)
                 if (marker != "") sub(/^(LATER|NOW|DONE) /, "", text)
 
+                # Only a link the entry opens with names a page. A link further
+                # along - "set up [[CHARLIE_09]] next" - is part of what the
+                # entry says, and leaves it an ordinary errand.
                 key = ""; annot = ""
-                if (match(text, /\[\[[^]]+\]\]/)) {
+                if (match(text, /^\[\[[^]]+\]\]/)) {
                     link = substr(text, RSTART + 2, RLENGTH - 4)
                     annot = substr(text, RSTART + RLENGTH)
                     sub(/^[[:space:]]+/, "", annot)
