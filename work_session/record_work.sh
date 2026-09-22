@@ -9,9 +9,16 @@
 # Takes a key and never asks a question; selection lives in work.sh.
 #
 # Usage:
-#   record_work.sh start <what> [<time>] [<duration>] [--dry-run]
+#   record_work.sh start <what> [<time>] [--dry-run]
+#   record_work.sh log   <what> <time> <duration> [--dry-run]
 #   record_work.sh stop  [--dry-run]
 #   record_work.sh status
+#
+# start opens an interval and log records a closed one, so which of the two is
+# meant is said rather than inferred from whether a duration happens to be there.
+# log opens nothing: it needs no session, it is not refused by an interval running
+# now, and it renders the day itself - forgetting to log this morning is what it
+# is for.
 #
 # Nothing here writes into the journal's "# Errands". Whether an errand is done
 # is the errand CLI's business, and the open interval is the only claim this
@@ -193,19 +200,33 @@ report_overlaps() {
 }
 
 case "$verb" in
-    start)
-        if [[ -z "$key" ]]; then
-            echo "Usage: $(basename "$0") start <what> [<time>] [<duration>]" >&2
-            echo "  to pick one: work start" >&2
-            exit 1
-        fi
-
-        # A duration means the work is already over, so this records the past rather
-        # than starting anything. It opens no interval, so it needs no session, and
-        # it must not be refused because something else is running now - forgetting
-        # to log this morning is exactly what it is for.
+    start|log)
+        # One body, because recording the past and starting something differ in
+        # what they write and not in what they resolve. Which one is meant comes
+        # from the verb, so a duration can be required where it belongs and
+        # refused where it does not.
         past=false
-        [[ -n "$duration" ]] && past=true
+        [[ "$verb" == "log" ]] && past=true
+
+        if $past; then
+            if [[ -z "$key" || -z "$at" || -z "$duration" ]]; then
+                echo "Usage: $(basename "$0") log <what> <time> <duration>" >&2
+                echo "  an interval is a start and a length: work log 'reading the RFC' 14:00 45m" >&2
+                exit 1
+            fi
+        else
+            if [[ -z "$key" ]]; then
+                echo "Usage: $(basename "$0") start <what> [<time>]" >&2
+                echo "  to pick one: work start" >&2
+                exit 1
+            fi
+            if [[ -n "$duration" ]]; then
+                echo "Error: start opens an interval and takes no duration" >&2
+                printf "  to record work already finished: work log '%s' %s %s\n" \
+                    "$key" "$at" "$duration_said" >&2
+                exit 1
+            fi
+        fi
 
         # Start is never a way to reach a session, so any open interval refuses it.
         # The picker runs this same check before it asks, so reaching here with

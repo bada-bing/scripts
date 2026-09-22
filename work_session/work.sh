@@ -11,9 +11,9 @@
 #
 # Usage:
 #   work.sh                              report the open interval
-#   work.sh start [<what>] [<time>] [<duration>]   pick when nothing is given
+#   work.sh start [<what>] [<time>]      pick when nothing is given
 #   work.sh start "<label>"              work with no task, labelled in words
-#                                        a duration records the past, opening nothing
+#   work.sh log <what> <time> <duration> record work already finished
 #   work.sh stop                         close the interval, render the day
 #   work.sh render [<day>]               render a day's record again
 
@@ -28,8 +28,8 @@ Usage:
   work start                  pick something, then start recording it
   work start <task-key>       start that one, skipping the picker
   work start <what> 16:00     start it, backdated to that time
-  work start <what> 16:00 2h  record work already done, opening nothing
   work start "<label>"        record work that has no task, under that label
+  work log <what> 16:00 2h    record work already finished, opening nothing
   work stop                   close the interval and render the day
   work render [<day>]         render a day's record again from Timewarrior
 
@@ -52,6 +52,12 @@ case "$verb" in
         ;;
 
     stop|status)
+        exec "$SCRIPT_DIR/record_work.sh" "$@"
+        ;;
+
+    # Nothing to pick for: log names work that is over, so there is no list of
+    # candidates it could offer.
+    log)
         exec "$SCRIPT_DIR/record_work.sh" "$@"
         ;;
 
