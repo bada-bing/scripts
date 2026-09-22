@@ -16,7 +16,9 @@
 # corrected or deleted interval is reflected simply by running this again, and
 # nothing hand-written survives there - the day's errands belong in "# Errands".
 #
-# Entries are ordered by when the work started, so the block reads as the day did.
+# Tasks come first and errands after, each ordered by when its work started. An
+# errand is small and there are many, so one list in time order would bury the
+# task work among them.
 #
 # Usage: render_work_actuals.sh [YYYY-MM-DD] [--dry-run] [--work-file <path>]
 
@@ -126,7 +128,11 @@ per_key=$(
               before:   (map(.before) | any),
               after:    (map(.after) | any)
           })
-        | sort_by(.start)
+        # Tasks first, then errands, each in the order its work started. An
+        # errand is small and frequent, so interleaving would bury the task work
+        # under it. An interval with no identity sorts with the errands and is
+        # dropped below either way.
+        | sort_by([(if .kind == "task" then 0 else 1 end), .start])
         | .[] | [.kind, .id, .sessions, .seconds, .before, .after] | @tsv
     '
 )
