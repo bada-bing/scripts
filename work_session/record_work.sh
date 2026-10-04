@@ -259,13 +259,14 @@ case "$verb" in
         task_json=$(task_for_key "$key")
 
         if [[ -z "$task_json" ]]; then
-            # A link names a page, and only a page with a pending task can be
-            # started - whether or not the link looks like a task key. One rule for
-            # every link, matching what the picker shows. And whether the argument
-            # arrived as the link itself or as the key parsed out of one, the fact
-            # worth saying is the same.
+            # An argument opening with a link names a page, and only a page with a
+            # pending task can be started - whether or not the link looks like a
+            # task key. One rule for every link, matching what the picker shows; a
+            # link further along leaves it an ordinary label. And whether the
+            # argument arrived as the link itself or as the key parsed out of one,
+            # the fact worth saying is the same.
             link=""
-            if [[ "$key" == *"[["*"]]"* ]]; then
+            if [[ "$key" == "[["* ]]; then
                 link="$key"
             else
                 page_path=$("$SCRIPT_DIR/find_task_page.sh" "$key" 2>/dev/null) || page_path=""
