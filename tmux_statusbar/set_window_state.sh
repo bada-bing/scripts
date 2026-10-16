@@ -32,6 +32,23 @@ done
 # Outside tmux there is no window to mark.
 [ -z "$target" ] && exit 0
 
+# Claude Code's hooks hand the session's transcript path in on stdin, as
+# "transcript_path" in a JSON object. The window carries it as a user option
+# beside the state, so the discussion view can read what the session says and
+# does, the way it reads @window_state. Only the end of the session, "clear",
+# takes it off the window; a key binding or a wrapper hands nothing in and
+# leaves it as it is. The argument is read rather than $state, which a
+# watched pane turns from waiting into clear below.
+transcript=""
+if [ ! -t 0 ]; then
+    transcript=$(sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p' | head -1)
+fi
+if [ "$1" = "clear" ]; then
+    tmux set-option -uw -t "$target" @claude_transcript 2>/dev/null
+elif [ -n "$transcript" ]; then
+    tmux set-option -w -t "$target" @claude_transcript "$transcript" 2>/dev/null
+fi
+
 # Being asked for attention while Miki is already looking at the pane is not
 # worth a marker - he can see it. Treat that as "seen" and clear instead, so
 # a finished turn in the focused pane does not leave a red window behind.
