@@ -32,8 +32,8 @@ Usage:
   work start "<label>"        record work that has no task, under that label
   work log <what> 16:00 2h    record work already finished, opening nothing
   work log <what> 9:06 1h40m --date 2026-09-19   write up another day
-  work stop                   close the interval, rounded to the quarter once
-                              confirmed, and render the day
+  work stop                   offer to close the task's discussion, then close
+                              the interval, rounded to the quarter once confirmed
   work render [<day>]         render a day's record again from Timewarrior
 
 --dry-run works throughout: it applies nothing and prints what it would do.
@@ -65,6 +65,33 @@ spell() {
     fi
 }
 
+# Offers to close the discussion of the task being recorded, when the topic
+# overview has one open, which merges its branch into the knowledge base's
+# main. Only that one: another discussion belongs to work this interval does
+# not record. A close that fails, on a conflict for instance, stops here with
+# the interval still running: git is reconciled before the record is written,
+# and the conflict is resolved in the terminal. Without the tool, or with no
+# discussion of the task open, nothing is asked.
+close_discussion() {
+    local dry_run="$1" key="$2" dir="${TOPIC_OVERVIEW_DIR:-$HOME/Developer/src/topic_overview}" answer
+    [[ -n "$key" && -f "$dir/package.json" ]] || return 0
+    pnpm --dir "$dir" --silent topic list 2>/dev/null | awk '{print $1}' | grep -qxF -- "$key" || return 0
+    if ! read -r -p "Close the discussion of $key, merging it into main? [Y/n] " answer; then
+        echo; echo "No answer; the interval is still running" >&2
+        return 1
+    fi
+    case "$answer" in
+        ""|y|Y)
+            if $dry_run; then
+                printf 'would: topic close %s\n' "$key" >&2
+            elif ! pnpm --dir "$dir" --silent topic close "$key"; then
+                printf '  resolve it, then stop again; the interval is still running\n' >&2
+                return 1
+            fi ;;
+        *) ;;
+    esac
+}
+
 verb="${1:-}"
 
 case "$verb" in
@@ -83,7 +110,9 @@ case "$verb" in
         ;;
 
     # Stopping is where the day's record gets its shape, so it is the one verb
-    # that asks: where the interval's edges go. Precise times are not the
+    # that asks: first whether the task's discussion closes, since closing
+    # reconciles the knowledge base's git and belongs before the interval is
+    # recorded, then where the interval's edges go. Precise times are not the
     # point of the record, so the edges are proposed rounded to the nearest
     # quarter, and recorded only once confirmed. The operation itself still
     # takes the edges as arguments and asks nothing.
@@ -99,7 +128,8 @@ case "$verb" in
         [[ "$(timew get dom.active 2>/dev/null || true)" == "1" ]] \
             || exec "$SCRIPT_DIR/record_work.sh" stop "$@"
 
-        label=$("$SCRIPT_DIR/get_active_identity.sh" | cut -f2)
+        IFS=$'\t' read -r kind label <<< "$("$SCRIPT_DIR/get_active_identity.sh")"
+        [[ "${kind:-}" == "task" ]] && { close_discussion "$dry_run" "$label" || exit 1; }
 
         start_epoch=$(date -j -u -f '%Y%m%dT%H%M%SZ' \
             "$(timew get dom.active.json | jq -r .start)" '+%s') || exit 1
