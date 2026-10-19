@@ -11,7 +11,7 @@
 # Usage:
 #   record_work.sh start <what> [<time>] [--dry-run]
 #   record_work.sh log   <what> <time> <duration> [--date D] [--dry-run]
-#   record_work.sh stop  [--dry-run]
+#   record_work.sh stop  [--start <time>] [--end <time>] [--dry-run]
 #   record_work.sh status
 #
 # start opens an interval and log records a closed one, so which of the two is
@@ -21,6 +21,13 @@
 # is for. --date puts it on another day, which is how a day that went unrecorded
 # is written up afterwards; start takes no --date, since an interval it opens can
 # only run from now.
+#
+# stop closes the interval as it ran, unless --start or --end says where its
+# edges go: work.sh proposes them rounded to the quarter and passes what was
+# confirmed. A time is HH:MM on the day, or YYYY-MM-DDTHH:MM for an interval
+# that crossed midnight. Edges that would overlap another interval are refused
+# before anything is stopped, with what is in the way, and exit 2 so the
+# caller can ask again.
 #
 # Nothing here writes into the journal's "# Errands". Whether an errand is done
 # is the errand CLI's business, and the open interval is the only claim this
@@ -41,11 +48,15 @@ key=""
 at=""
 duration=""
 on=""
+from=""
+to=""
 words=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) dry_run=true ;;
         --date)    on="${2:-}"; shift ;;
+        --start)   from="${2:-}"; shift ;;
+        --end)     to="${2:-}"; shift ;;
         -*)        echo "Error: unknown option $1" >&2; exit 1 ;;
         *)         case "$words" in
                        0) key="$1" ;;
@@ -82,6 +93,25 @@ fi
 # Timewarrior misreads "2026-09-19T9:00" rather than refusing it - which surfaced
 # as a phantom overlap against an empty day.
 [[ -n "$at" ]] && at=$(printf '%02d:%s' "$((10#${at%%:*}))" "${at##*:}")
+
+# An edge of the interval being stopped, on the day unless it names its own.
+# Zero-padded for the same reason as above.
+edge_stamp() {
+    local t="$1" d="$day"
+    if [[ "$t" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{1,2}:[0-9]{2})$ ]]; then
+        d=${BASH_REMATCH[1]}; t=${BASH_REMATCH[2]}
+    elif [[ ! "$t" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+        printf "Error: '%s' is not a time like 16:00 or 2026-10-17T16:00\n" "$t" >&2
+        exit 1
+    fi
+    printf '%sT%02d:%s' "$d" "$((10#${t%%:*}))" "${t##*:}"
+}
+[[ -n "$from" ]] && from=$(edge_stamp "$from")
+[[ -n "$to" ]] && to=$(edge_stamp "$to")
+if [[ "$verb" != "stop" && ( -n "$from" || -n "$to" ) ]]; then
+    echo "Error: --start and --end place the edges of the interval being stopped" >&2
+    exit 1
+fi
 
 # Hours and minutes, spelled h and m, and nothing else - the shape the journal
 # already uses. Every other spelling is refused rather than interpreted, because
@@ -187,24 +217,23 @@ interval_id_starting_at() {
         | jq -r --arg s "$stamp" 'map(select(.start == $s)) | .[0].id // empty'
 }
 
-# Timewarrior refuses an overlap itself, and says what to do about it but not what
-# is in the way. Its refusal stands as the single authority - this only explains it.
-# The :adjust hint would make the overlap fit by reshaping whatever was already
-# recorded, which is the one thing the record must never do quietly.
-report_overlaps() {
-    local from="$1" mins="$2" s e
-    s=$(date -j -f '%Y-%m-%d %H:%M:%S' "$day $from:00" '+%s') || return 0
-    e=$((s + mins * 60))
-
-    # jq compares in epoch seconds; the clock times are formatted here, because
-    # Timewarrior stores UTC and these are read by someone thinking in local time.
-    timew export "$day" - "$(date -j -v+1d -f '%Y-%m-%d' "$day" '+%Y-%m-%d')" 2>/dev/null \
-        | jq -r --argjson s "$s" --argjson e "$e" '
+# The intervals in the way of one from $1 to $2, epoch seconds, one line each:
+# what it is and when it ran. The open interval is left out when $3 is "closed",
+# since the one being stopped is always in its own way.
+#
+# jq compares in epoch seconds; the clock times are formatted here, because
+# Timewarrior stores UTC and these are read by someone thinking in local time.
+in_the_way() {
+    local s="$1" e="$2" open=true
+    [[ "${3:-}" == "closed" ]] && open=false
+    timew export "$(date -r "$s" '+%Y-%m-%d')" - "$(date -j -v+1d -r "$e" '+%Y-%m-%d')" 2>/dev/null \
+        | jq -r --argjson s "$s" --argjson e "$e" --argjson open "$open" '
         def stamp: strptime("%Y%m%dT%H%M%SZ") | mktime;
         def what: .annotation
                 // ([.tags[]? | select(startswith("%"))] | first | if . then .[1:] else null end)
                 // "an interval with no identity";
         .[]
+        | select($open or .end != null)
         | select(((.start | stamp) < $e)
              and (((.end // "20991231T000000Z") | stamp) > $s))
         | [what, (.start | stamp), (if .end then (.end | stamp) else 0 end)] | @tsv' \
@@ -213,6 +242,16 @@ report_overlaps() {
             "$(date -r "$from_epoch" '+%H:%M')" \
             "$([[ "$to_epoch" == 0 ]] && printf 'now' || date -r "$to_epoch" '+%H:%M')" >&2
       done
+}
+
+# Timewarrior refuses an overlap itself, and says what to do about it but not what
+# is in the way. Its refusal stands as the single authority - this only explains it.
+# The :adjust hint would make the overlap fit by reshaping whatever was already
+# recorded, which is the one thing the record must never do quietly.
+report_overlaps() {
+    local from="$1" mins="$2" s
+    s=$(date -j -f '%Y-%m-%d %H:%M:%S' "$day $from:00" '+%s') || return 0
+    in_the_way "$s" $((s + mins * 60))
 }
 
 case "$verb" in
@@ -368,8 +407,38 @@ case "$verb" in
         fi
         IFS=$'\t' read -r kind label <<< "$(active_identity)"
 
+        # Edges that are moved are checked before anything is stopped, so a
+        # refusal leaves the interval running and the caller free to ask for
+        # other times: the record never takes an overlap, and never reshapes
+        # what is already recorded to make one fit.
+        if [[ -n "$from" || -n "$to" ]]; then
+            s=$(date -j -u -f '%Y%m%dT%H%M%SZ' "$(active_interval | jq -r .start)" '+%s') || exit 1
+            e=$(date '+%s')
+            [[ -z "$from" ]] || s=$(date -j -f '%Y-%m-%dT%H:%M' "$from" '+%s') || exit 1
+            [[ -z "$to" ]] || e=$(date -j -f '%Y-%m-%dT%H:%M' "$to" '+%s') || exit 1
+            if [[ "$e" -le "$s" ]]; then
+                echo "Error: the end must come after the start" >&2
+                exit 2
+            fi
+            blocking=$(in_the_way "$s" "$e" closed 2>&1)
+            if [[ -n "$blocking" ]]; then
+                printf 'Error: %s to %s would overlap what is already recorded\n' \
+                    "$(date -r "$s" '+%H:%M')" "$(date -r "$e" '+%H:%M')" >&2
+                printf '%s\n' "$blocking" >&2
+                exit 2
+            fi
+        fi
+
         # Closing the interval before rendering means the actuals include it.
         run timew stop :yes >/dev/null || exit 1
+
+        # The interval just closed is @1, since ids run newest first by start
+        # and nothing can have started after the one that was running.
+        for edge in start end; do
+            stamp="$from"; [[ "$edge" == "end" ]] && stamp="$to"
+            [[ -n "$stamp" ]] || continue
+            run timew modify "$edge" @1 "$stamp" :yes >/dev/null || exit 1
+        done
         "$SCRIPT_DIR/render_work_actuals.sh" "$day" $render_opts
 
         # Stopping records that the work happened and nothing more. Whether it is

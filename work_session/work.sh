@@ -14,7 +14,8 @@
 #   work.sh start [<what>] [<time>]      pick when nothing is given
 #   work.sh start "<label>"              work with no task, labelled in words
 #   work.sh log <what> <time> <duration> [--date D]  record finished work
-#   work.sh stop                         close the interval, render the day
+#   work.sh stop                         close the interval, rounded to the
+#                                        quarter once confirmed, render the day
 #   work.sh render [<day>]               render a day's record again
 
 set -uo pipefail
@@ -31,12 +32,37 @@ Usage:
   work start "<label>"        record work that has no task, under that label
   work log <what> 16:00 2h    record work already finished, opening nothing
   work log <what> 9:06 1h40m --date 2026-09-19   write up another day
-  work stop                   close the interval and render the day
+  work stop                   close the interval, rounded to the quarter once
+                              confirmed, and render the day
   work render [<day>]         render a day's record again from Timewarrior
 
 --dry-run works throughout: it applies nothing and prints what it would do.
 A verb is handed to record_work.sh unchanged.
 USAGE
+}
+
+# The nearest quarter of an hour, in epoch seconds.
+quarter() {
+    printf '%d' $(( ($1 + 450) / 900 * 900 ))
+}
+
+clock() {
+    date -r "$1" '+%H:%M'
+}
+
+# An edge as record_work.sh takes it, with its day, since the interval may
+# have crossed midnight.
+stamp() {
+    date -r "$1" '+%Y-%m-%dT%H:%M'
+}
+
+# Minutes as the journal spells a duration: 2h, 2h30m, 45m.
+spell() {
+    local h=$(( $1 / 60 )) m=$(( $1 % 60 ))
+    if   [[ "$h" -eq 0 ]]; then printf '%dm' "$m"
+    elif [[ "$m" -eq 0 ]]; then printf '%dh' "$h"
+    else printf '%dh%02dm' "$h" "$m"
+    fi
 }
 
 verb="${1:-}"
@@ -52,8 +78,72 @@ case "$verb" in
         exec "$SCRIPT_DIR/render_work_actuals.sh" "$@"
         ;;
 
-    stop|status)
+    status)
         exec "$SCRIPT_DIR/record_work.sh" "$@"
+        ;;
+
+    # Stopping is where the day's record gets its shape, so it is the one verb
+    # that asks: where the interval's edges go. Precise times are not the
+    # point of the record, so the edges are proposed rounded to the nearest
+    # quarter, and recorded only once confirmed. The operation itself still
+    # takes the edges as arguments and asks nothing.
+    stop)
+        shift
+        dry_run=false
+        for arg in "$@"; do
+            case "$arg" in
+                --dry-run) dry_run=true ;;
+                *) echo "Error: unknown option $arg" >&2; exit 1 ;;
+            esac
+        done
+        [[ "$(timew get dom.active 2>/dev/null || true)" == "1" ]] \
+            || exec "$SCRIPT_DIR/record_work.sh" stop "$@"
+
+        label=$("$SCRIPT_DIR/get_active_identity.sh" | cut -f2)
+
+        start_epoch=$(date -j -u -f '%Y%m%dT%H%M%SZ' \
+            "$(timew get dom.active.json | jq -r .start)" '+%s') || exit 1
+        now=$(date '+%s')
+        from=$(quarter "$start_epoch")
+        to=$(quarter "$now")
+        # An interval shorter than a quarter rounds to nothing, and a quarter
+        # is the least the record says about work that happened.
+        [[ "$to" -gt "$from" ]] || to=$((from + 900))
+
+        printf '%s  %s–%s  →  %s–%s (%s)\n' "${label:-an interval with no identity}" \
+            "$(clock "$start_epoch")" "$(clock "$now")" \
+            "$(clock "$from")" "$(clock "$to")" "$(spell $(( (to - from) / 60 )))"
+        while :; do
+            if ! read -r -p "Record $(clock "$from")–$(clock "$to")? [Y/n/<start> <end>] " answer; then
+                echo; echo "No answer; the interval is still running" >&2
+                exit 1
+            fi
+            # A refusal, exit 2, is an overlap with what is already recorded,
+            # said with what is in the way; other times can then be given.
+            case "$answer" in
+                ""|y|Y)
+                    "$SCRIPT_DIR/record_work.sh" stop --start "$(stamp "$from")" --end "$(stamp "$to")" "$@"
+                    rc=$?; [[ "$rc" -eq 2 ]] && continue; exit "$rc" ;;
+                n|N)
+                    exec "$SCRIPT_DIR/record_work.sh" stop "$@" ;;
+                *)
+                    # Two times, each read on the day of the edge it replaces,
+                    # so an interval that crossed midnight keeps its days.
+                    read -r a b <<< "$answer"
+                    if [[ "$a" =~ ^[0-9]{1,2}:[0-9]{2}$ && "$b" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+                        a=$(date -j -f '%Y-%m-%d %H:%M' "$(date -r "$from" '+%Y-%m-%d') $a" '+%s') || continue
+                        b=$(date -j -f '%Y-%m-%d %H:%M' "$(date -r "$to" '+%Y-%m-%d') $b" '+%s') || continue
+                        if [[ "$b" -le "$a" ]]; then
+                            echo "  the end must come after the start" >&2
+                            continue
+                        fi
+                        from=$a; to=$b
+                        "$SCRIPT_DIR/record_work.sh" stop --start "$(stamp "$from")" --end "$(stamp "$to")" "$@"
+                        rc=$?; [[ "$rc" -eq 2 ]] && continue; exit "$rc"
+                    fi
+                    echo "  Enter records the rounded times, n the exact ones, or give two times: 08:00 10:45" >&2 ;;
+            esac
+        done
         ;;
 
     # Nothing to pick for: log names work that is over, so there is no list of
