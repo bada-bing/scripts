@@ -73,13 +73,19 @@ sql() { local q="'"; printf "'%s'" "${1//$q/$q$q}"; }
 
 # Where an agent keeps a session's transcript, from the record alone. Claude
 # Code files it under the directory it ran in, every character outside
-# [A-Za-z0-9] written as a dash; pi under its own encoding of the directory,
-# which the id's suffix finds without reproducing. Prints nothing when the
-# transcript is gone, which is the case the store exists for.
+# [A-Za-z0-9] written as a dash; a record whose directory is not where the
+# session started, one first recorded mid-session, say, is found by the id
+# instead, which is unique across the project folders. pi files it under
+# its own encoding of the directory, which the id's suffix finds without
+# reproducing. Prints nothing when the transcript is gone, which is the
+# case the store exists for.
 transcript() {
     local agent="$1" directory="$2" id="$3" path
     case "$agent" in
-        claude) path="$HOME/.claude/projects/$(printf '%s' "$directory" | sed 's/[^A-Za-z0-9]/-/g')/$id.jsonl" ;;
+        claude)
+            path="$HOME/.claude/projects/$(printf '%s' "$directory" | sed 's/[^A-Za-z0-9]/-/g')/$id.jsonl"
+            [[ -f "$path" ]] || path=$(ls "$HOME/.claude/projects"/*/"$id.jsonl" 2>/dev/null | head -1)
+            ;;
         pi)     path=$(ls "$HOME/.pi/agent/sessions"/*/*"_$id.jsonl" 2>/dev/null | head -1) ;;
         *)      return ;;
     esac
