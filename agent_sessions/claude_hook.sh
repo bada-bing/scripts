@@ -8,7 +8,10 @@
 # place tmux is read; the store is written only through agent_session.sh, and
 # the hook writes nothing of its own.
 #
-# Usage, from settings.json:   claude_hook.sh            the hook's JSON on stdin
+# Usage, from settings.json:   claude_hook.sh            the hook's JSON on stdin,
+#                                                        at SessionStart,
+#                                                        UserPromptSubmit and
+#                                                        SessionEnd
 # Usage, by hand in a window:  claude_hook.sh --report [<session-id>]
 #                                                        what it resolves there
 #
@@ -27,13 +30,24 @@ TASK_PAGE="$SCRIPT_DIR/../work_session/find_task_page.sh"
 # pane of its own; once it is attached, the client in the pane names the
 # session on its command line, and the pane is the client's. Neither chain
 # holds for an unattached background session, which gets no pane.
+#
+# A session started from inside another agent, a one-shot run from its Bash
+# tool, reaches the pane through the agent that started it and owns none of
+# it. The walk counts the claude processes it passes, the session's own
+# included, and prints the count after the pane: a second one is the parent,
+# and the pane is the parent's. Nothing in the environment tells the two
+# apart, since Claude Code sets CLAUDECODE and CLAUDE_CODE_CHILD_SESSION for
+# the hooks of a session started by hand as much as for a nested one.
 pane_of_process() {
-    local pid="$1" panes
+    local pid="$1" panes ppid comm pane agents=0
     panes=$(tmux list-panes -a -F '#{pane_pid} #{pane_id}' 2>/dev/null) || return
     while [[ "$pid" -gt 1 ]]; do
-        awk -v p="$pid" '$1 == p { print $2; found = 1 } END { exit !found }' <<<"$panes" && return
-        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-        [[ -z "$pid" ]] && return
+        read -r ppid comm < <(ps -o ppid=,comm= -p "$pid" 2>/dev/null)
+        [[ "${comm##*/}" == claude ]] && agents=$((agents + 1))
+        pane=$(awk -v p="$pid" '$1 == p { print $2 }' <<<"$panes")
+        [[ -n "$pane" ]] && { printf '%s %s' "$pane" "$agents"; return; }
+        pid="$ppid"
+        [[ -z "$pid" ]] && return 1
     done
     return 1
 }
@@ -84,7 +98,12 @@ transcript_path=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null)
 [[ -z "$transcript_path" && -n "${TMUX_PANE:-}" ]] \
     && transcript_path=$(tmux show-option -qvw -t "$TMUX_PANE" @claude_transcript 2>/dev/null)
 
-pane=$(pane)
+read -r pane agents < <(pane)
+# A session started from inside another agent has a window up its chain and
+# none of its own, so it is given no pane: it renames nothing, takes no topic
+# off the address, and is titled as a session outside tmux.
+nested=false
+[[ "${agents:-0}" -gt 1 ]] && { nested=true; pane=""; }
 session_name="" window_name="" auto_rename="" key="" title=""
 if [[ -n "$pane" ]]; then
     IFS=$'\t' read -r session_name window_name auto_rename < <(
@@ -114,11 +133,13 @@ directory=$(jq -r '.directory // ""' <<<"$existing")
 # set through sessionTitle lands there the same way as -n or /rename. The
 # transcript is not on disk at start nor at the first prompt, and a name
 # given with -n is then known only to the agents listing. That listing also
-# names what was not named: an interactive session <directory>-xx, and a
-# background session after its prompt, so a background session's name
-# counts only when it is shaped <key>:<role>. Without a title from either
-# source the title is taken to be the one the hook wrote last, so a first
-# prompt sets nothing again.
+# names what was not named: an interactive session after its directory,
+# the basename in lower case with every character outside [a-z0-9] a dash
+# and two hex characters after it, kb-3a for KB and foo-bar-baz-54 for
+# Foo_Bar.Baz, and a background session after its prompt, so a background
+# session's name counts only when it is shaped <key>:<role>. Without a title
+# from either source the title is taken to be the one the hook wrote last,
+# so a first prompt sets nothing again.
 claude_title=""
 if [[ -f "$transcript_path" ]]; then
     claude_title=$(grep '"type":"custom-title"' "$transcript_path" | tail -1 | jq -r '.customTitle // ""' 2>/dev/null)
@@ -126,7 +147,8 @@ elif [[ -n "$session_id" ]]; then
     IFS=$'\t' read -r kind name < <(claude agents --json 2>/dev/null \
         | jq -r --arg id "$session_id" '.[] | select(.sessionId == $id) | [.kind // "", .name // ""] | @tsv' 2>/dev/null | head -1)
     claude_title="$recorded_title"
-    if [[ "$kind" == "interactive" && -n "$name" && ! "$name" =~ ^"$(basename "$directory")"-[0-9a-f]{2}$ ]]; then
+    unnamed="^$(basename "$directory" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')-[0-9a-f]{2}$"
+    if [[ "$kind" == "interactive" && -n "$name" && ! "$(tr '[:upper:]' '[:lower:]' <<<"$name")" =~ $unnamed ]]; then
         claude_title="$name"
     elif [[ "$kind" != "interactive" && "$name" =~ ^[A-Za-z0-9_.-]+:[A-Za-z0-9_-]+$ ]]; then
         claude_title="$name"
@@ -172,11 +194,22 @@ wanted=$(jq -nc --argjson old "$existing" \
 # carries. A prompt on which nothing moved touches nothing. A start, fresh,
 # resumed, after /clear or after compaction, also hands the agent its start context: the
 # topic, its other sessions and where the work stands, from start_context.sh.
+#
+# A one-shot, started as sdk-cli, is written at its end instead. Run with
+# --no-session-persistence it leaves no transcript, and nothing in the
+# hook's input or environment says so: the transcript is absent at the start
+# and at the first prompt of every session, and present at the end of every
+# session that keeps one. So a one-shot is recorded at SessionEnd when its
+# transcript is on disk, and one that left none is not recorded at all.
 topic=$(jq -r '.topic // ""' <<<"$wanted")
+entrypoint=$(jq -r '.entrypoint // ""' <<<"$wanted")
+write_record() {
+    [[ -n "$session_id" && "$wanted" != "$existing" ]] \
+        && printf '%s' "$wanted" | "$SCRIPT_DIR/agent_session.sh" write 2>/dev/null
+}
 case "$event" in
     SessionStart | UserPromptSubmit)
-        [[ -n "$session_id" && "$wanted" != "$existing" ]] \
-            && printf '%s' "$wanted" | "$SCRIPT_DIR/agent_session.sh" write 2>/dev/null
+        [[ "$entrypoint" != "sdk-cli" ]] && write_record
         output='{}'
         [[ -n "$title" && "$title" != "$claude_title" ]] \
             && output=$(jq -c --arg title "$title" '. + {sessionTitle: $title}' <<<"$output")
@@ -188,10 +221,13 @@ case "$event" in
         [[ "$output" != '{}' ]] \
             && jq -c --arg event "$event" '{hookSpecificOutput: ({hookEventName: $event} + .)}' <<<"$output"
         ;;
+    SessionEnd)
+        [[ "$entrypoint" == "sdk-cli" && -f "$transcript_path" ]] && write_record
+        ;;
 esac
 
 if $report; then
-    echo "pane:       ${pane:-(outside tmux)}"
+    echo "pane:       ${pane:-$($nested && echo "(inside another agent's window, none of its own)" || echo '(outside tmux)')}"
     echo "session:    ${session_name:-(none)}"
     echo "window:     ${window_name:-(none)}$([[ "$auto_rename" == 1 ]] && echo ' (automatically named)')"
     echo "topic:      ${key:-(no task)}"
