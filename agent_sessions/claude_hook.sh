@@ -156,20 +156,21 @@ elif [[ -n "$session_id" ]]; then
 fi
 
 # A title that is neither the one the hook wrote last nor the address was
-# given by hand: it names the window, and the hook keeps it rather than
-# writing the address over it, for as long as the window carries it. With
-# no pane there is no address, so the title is whatever the session carries,
-# and a name shaped <key>:<role> with a page for the key gives the topic:
-# a background session started with -n 10x_06:worker is 10x_06's.
+# given by hand: it names the window, and the title is then the address as
+# always, so the name keeps the topic in front of it. A name already shaped
+# as this session's address, -n 10x_06:worker in 10x_06, names the window
+# after its role. With no pane there is no address, so the title is whatever
+# the session carries, and a name shaped <key>:<role> with a page for the
+# key gives the topic: a background session started with -n 10x_06:worker
+# is 10x_06's.
 hand_named=false
 if [[ -n "$claude_title" ]]; then
     if [[ -n "$pane" ]]; then
         if [[ "$claude_title" != "$recorded_title" && "$claude_title" != "$title" ]]; then
             hand_named=true
-            $report || tmux rename-window -t "$pane" "$claude_title" 2>/dev/null
-            title="$claude_title"
-        elif [[ "$claude_title" == "$window_name" ]]; then
-            title="$claude_title"
+            window_name="${claude_title#"$session_name":}"
+            $report || tmux rename-window -t "$pane" "$window_name" 2>/dev/null
+            title="$session_name:$window_name"
         fi
     else
         title="$claude_title"
