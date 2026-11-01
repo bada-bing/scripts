@@ -23,7 +23,8 @@
 #
 # Usage:
 #   agent_session.sh get   <agent> <id>      the record, as JSON
-#   agent_session.sh list  <key>             a topic's sessions, one-shots left out
+#   agent_session.sh list  <key>             a topic's sessions, one-shots summed up
+#   agent_session.sh list  <key> --one-shots the one-shots, as rows
 #   agent_session.sh write < record.json     the whole record, replaced or created
 #
 # get and write share one shape, an object with the seven keys above, so a
@@ -34,6 +35,7 @@
 # list prints one line per session, tab-separated: started, last used, agent,
 # id, title, and the note or, without one, the first prompt. The times are
 # read off the transcript, so a session whose transcript is gone shows none.
+# One-shots close the listing as one line, "12 one-shots, 14:02 to 16:40".
 #
 # The store is created on first use, so nothing has to be set up by hand.
 
@@ -122,30 +124,58 @@ case "$verb" in
         jq '.[0]' <<<"$record"
         ;;
     list)
-        if [[ $# -ne 1 ]]; then
-            echo "Usage: $(basename "$0") list <key>" >&2
+        if [[ $# -lt 1 || $# -gt 2 || ( $# -eq 2 && "$2" != "--one-shots" ) ]]; then
+            echo "Usage: $(basename "$0") list <key> [--one-shots]" >&2
             exit 1
         fi
-        # One-shots, started as sdk-cli, are left out: a -p run is not a
-        # session to resume or to build on. The note describes a session
-        # when there is one, and its first prompt stands in otherwise.
-        # Fields come out on the unit separator rather than a tab: a tab is
-        # whitespace to read, which folds two of them into one and drops an
-        # empty column, so an empty title would take the note's place.
-        query -separator $'\x1f' "SELECT agent, id, directory, title, note FROM sessions
-                                  WHERE topic = $(sql "$1") AND entrypoint != 'sdk-cli'
-                                  ORDER BY rowid;" \
-            | while IFS=$'\x1f' read -r agent id directory title note; do
-                path=$(transcript "$agent" "$directory" "$id")
-                started='-' used='-' prompt=''
-                [[ -n "$path" ]] && IFS=$'\t' read -r started used prompt < <(transcript_facts "$path")
-                about="${note:-${prompt:-(transcript gone)}}"
-                printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$started" "$used" "$agent" "$id" "$title" "$about"
-            done | sort
+        key="$1"
+        # One line per session: started, last used, agent, id, title, and the
+        # note when there is one, else the first prompt, else that the
+        # transcript is gone. Fields come out on the unit separator rather
+        # than a tab: a tab is whitespace to read, which folds two of them
+        # into one and drops an empty column, so an empty title would take
+        # the note's place.
+        rows() {
+            query -separator $'\x1f' "SELECT agent, id, directory, title, note FROM sessions
+                                      WHERE topic = $(sql "$key") AND entrypoint $1 'sdk-cli'
+                                      ORDER BY rowid;" \
+                | while IFS=$'\x1f' read -r agent id directory title note; do
+                    path=$(transcript "$agent" "$directory" "$id")
+                    started='-' used='-' prompt=''
+                    [[ -n "$path" ]] && IFS=$'\t' read -r started used prompt < <(transcript_facts "$path")
+                    about="${note:-${prompt:-(transcript gone)}}"
+                    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$started" "$used" "$agent" "$id" "$title" "$about"
+                done | sort
+        }
+        # One-shots, started as sdk-cli, are not sessions to resume or to
+        # build on, so they close the listing as one line, a count and the
+        # span of their activity, and are listed as rows only on request.
+        if [[ "${2:-}" == "--one-shots" ]]; then
+            rows "="
+        else
+            rows "!="
+            rows "=" | awk -F'\t' '
+                { n++ }
+                $1 != "-" { if (!from || $1 < from) from = $1; if ($2 > to) to = $2 }
+                END {
+                    if (!n) exit
+                    line = n " one-shot" (n == 1 ? "" : "s")
+                    if (from) {
+                        if (substr(from, 1, 10) == substr(to, 1, 10)) to = substr(to, 12)
+                        line = line ", " from " to " to
+                    }
+                    print line
+                }'
+        fi
         ;;
     write)
         if [[ $# -ne 0 ]]; then
             echo "Usage: $(basename "$0") write < record.json" >&2
+            exit 1
+        fi
+        input=$(cat)
+        if [[ -z "$input" ]]; then
+            echo "Error: no record on stdin" >&2
             exit 1
         fi
         # The record comes in as the object get prints, so the two round-trip:
@@ -161,7 +191,7 @@ case "$verb" in
             | if $missing != [] then error("required: " + ($missing | join(", "))) else . end
             | ["agent", "id", "directory", "entrypoint", "topic", "title", "note"]
             | map($r[.] // "" | tostring)
-        ' 2>&1) || { echo "Error: ${record#jq: error (at <stdin>:*): }" >&2; exit 1; }
+        ' <<<"$input" 2>&1) || { echo "Error: ${record#jq: error (at <stdin>:*): }" >&2; exit 1; }
         fields=()
         while IFS= read -r -d '' value; do fields+=("$value"); done < <(jq -j '.[] + "\u0000"' <<<"$record")
         # The whole record, replacing the one there or creating it. There is no
