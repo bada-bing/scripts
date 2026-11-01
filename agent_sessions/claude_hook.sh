@@ -169,15 +169,24 @@ wanted=$(jq -nc --argjson old "$existing" \
 
 # Every prompt compares and writes only what differs: the record when it is
 # not the one in the store, the title when it is not the one the session
-# carries. A prompt on which nothing moved touches nothing.
+# carries. A prompt on which nothing moved touches nothing. A start, fresh,
+# resumed, after /clear or after compaction, also hands the agent its start context: the
+# topic, its other sessions and where the work stands, from start_context.sh.
+topic=$(jq -r '.topic // ""' <<<"$wanted")
 case "$event" in
     SessionStart | UserPromptSubmit)
         [[ -n "$session_id" && "$wanted" != "$existing" ]] \
             && printf '%s' "$wanted" | "$SCRIPT_DIR/agent_session.sh" write 2>/dev/null
-        if [[ -n "$title" && "$title" != "$claude_title" ]]; then
-            jq -nc --arg event "$event" --arg title "$title" \
-                '{hookSpecificOutput: {hookEventName: $event, sessionTitle: $title}}'
+        output='{}'
+        [[ -n "$title" && "$title" != "$claude_title" ]] \
+            && output=$(jq -c --arg title "$title" '. + {sessionTitle: $title}' <<<"$output")
+        if [[ "$event" == "SessionStart" ]]; then
+            start_context=$("$SCRIPT_DIR/start_context.sh" "$topic" "$session_id" "$auto_rename" 2>/dev/null)
+            [[ -n "$start_context" ]] \
+                && output=$(jq -c --arg text "$start_context" '. + {additionalContext: $text}' <<<"$output")
         fi
+        [[ "$output" != '{}' ]] \
+            && jq -c --arg event "$event" '{hookSpecificOutput: ({hookEventName: $event} + .)}' <<<"$output"
         ;;
 esac
 
@@ -188,6 +197,8 @@ if $report; then
     echo "topic:      ${key:-(no task)}"
     echo "title:      ${title:-(none)}$($hand_named && echo ' (given by hand, would rename the window)')"
     echo "entrypoint: $(entrypoint "$transcript_path")"
+    echo "start context:"
+    "$SCRIPT_DIR/start_context.sh" "$topic" "$session_id" "$auto_rename" | sed 's/^/  /'
     if [[ -z "$session_id" ]]; then
         echo "record:     no session id, pass one"
     elif [[ "$existing" == '{}' ]]; then
