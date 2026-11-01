@@ -92,11 +92,16 @@ report_id="${2:-}"
 # window.
 input=""
 $report || input=$(cat)
-session_id=$(jq -r '.session_id // ""' <<<"$input" 2>/dev/null)
-[[ -n "$report_id" ]] && session_id="$report_id"
 transcript_path=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null)
 [[ -z "$transcript_path" && -n "${TMUX_PANE:-}" ]] \
     && transcript_path=$(tmux show-option -qvw -t "$TMUX_PANE" @claude_transcript 2>/dev/null)
+# The session's id is the transcript's name. The input's session_id is the
+# running process's: the same on a first run, and a fresh one on every
+# resume, which would record each resume as a session no transcript names.
+# So the id is the transcript's, and the input's only when there is none.
+session_id=$(jq -r '.session_id // ""' <<<"$input" 2>/dev/null)
+[[ -n "$transcript_path" ]] && session_id=$(basename "$transcript_path" .jsonl)
+[[ -n "$report_id" ]] && session_id="$report_id"
 
 read -r pane agents < <(pane)
 # A session started from inside another agent has a window up its chain and
@@ -210,7 +215,12 @@ write_record() {
 }
 case "$event" in
     SessionStart | UserPromptSubmit)
-        [[ "$entrypoint" != "sdk-cli" ]] && write_record
+        # The record is written at a prompt, never at the start. A start
+        # has nothing to record yet: a process left at /resume or quit at
+        # once never had a session, and at the start of a resume the
+        # transcript path names the new process rather than the session
+        # resumed. At a prompt the path is the session's own.
+        [[ "$event" == "UserPromptSubmit" && "$entrypoint" != "sdk-cli" ]] && write_record
         output='{}'
         [[ -n "$title" && "$title" != "$claude_title" ]] \
             && output=$(jq -c --arg title "$title" '. + {sessionTitle: $title}' <<<"$output")
