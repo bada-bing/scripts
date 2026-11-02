@@ -7,11 +7,11 @@
 # system, knowing its conventions so they never have to be held in the head. One
 # asymmetry: work owns Timewarrior and merely renders "# Work", so that block can
 # always be rebuilt from the store. Logseq is this store. Nothing can rebuild a
-# day's "# Errands", so errand writes with a care work does not need.
+# day's "# Plan", so errand writes with a care work does not need.
 #
 # Two places hold errands, and capture writes to one or the other:
 #
-#   the day's "# Errands"  the errands being done today, from either source
+#   the day's "# Plan"  the errands being done today, from either source
 #   SOA/Errands            errands captured for later, a pool to draw from
 #
 # Neither is a staging area for the other. An errand captured for today is not
@@ -19,7 +19,7 @@
 # day's block rather than a queue that feeds it.
 #
 # Usage:
-#   errand.sh capture <text>             into today's "# Errands"
+#   errand.sh capture <text>             into today's "# Plan"
 #   errand.sh capture < block            the same, with the errand's subtree
 #   errand.sh capture --backlog <text>   into SOA/Errands instead
 #   errand.sh capture --backlog < block
@@ -113,7 +113,7 @@ usage() {
     sed -n '/^# Usage:/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
-# True when today's "# Errands" holds an entry with exactly this text. list
+# True when today's "# Plan" holds an entry with exactly this text. list
 # prints marker, key, annotation, text, so the text is the fourth field.
 today_has() {
     "$JOURNAL" list "${@:2}" \
@@ -268,7 +268,7 @@ case "$verb" in
         # Refused before the clock is touched, so a mistyped errand stops nothing.
         if ! today_has "$text"; then
             printf "Error: today has no errand reading: %s\n" "$text" >&2
-            echo "  the text must match the entry in # Errands exactly" >&2
+            echo "  the text must match the entry in # Plan exactly" >&2
             exit 1
         fi
 

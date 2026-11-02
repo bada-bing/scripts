@@ -6,10 +6,11 @@
 #
 # A journal holds two blocks about work, and they answer different questions:
 #
-#   # Errands  what got done today - small work too small to be a task, whether
-#              captured by hand, taken from the backlog or instantiated from a
-#              chore. Read and written both. Its order is the prioritisation, so
-#              nothing sorts it, and DONE on an entry says it was completed.
+#   # Plan     what is worked today - tasks by their [[KEY]] and errands by their
+#              text, whether captured by hand, taken from the backlog or
+#              instantiated from a chore. Read and written both. Its order is the
+#              prioritisation, so nothing sorts it, and DONE on an entry says it
+#              was completed.
 #   # Work     where the time went, rendered from Timewarrior. Machine-owned:
 #              render_work_actuals.sh replaces it wholesale.
 #
@@ -32,7 +33,7 @@
 #   journal_work_block.sh replace  <line>...               [--block B] [--date D]
 #   journal_work_block.sh diff                             [--date D]
 #
-# --block defaults to Errands, the block a person edits. --date defaults to today.
+# --block defaults to Plan, the block a person edits. --date defaults to today.
 # list prints TSV: marker, key, annotation, text - the marker column is empty on
 # anything but a completed errand.
 #
@@ -56,7 +57,7 @@ shift || true
 
 date_arg=""
 work_file=""
-block="Errands"
+block="Plan"
 dry_run=false
 args=()
 while [[ $# -gt 0 ]]; do
@@ -70,7 +71,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$block" ]]; then
-    echo "Error: --block needs a heading name, e.g. Errands or Work" >&2
+    echo "Error: --block needs a heading name, e.g. Plan or Work" >&2
     exit 1
 fi
 

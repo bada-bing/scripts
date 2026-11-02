@@ -11,7 +11,7 @@
 # arrives with whatever was already done to it.
 #
 # No state marker is read. A top-level DONE is only ever written into the
-# journal's "# Errands", never onto this page, and a nested DONE is payload like
+# journal's "# Plan", never onto this page, and a nested DONE is payload like
 # any other nested line.
 #
 # Usage:

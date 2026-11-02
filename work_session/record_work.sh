@@ -29,7 +29,7 @@
 # before anything is stopped, with what is in the way, and exit 2 so the
 # caller can ask again.
 #
-# Nothing here writes into the journal's "# Errands". Whether an errand is done
+# Nothing here writes into the journal's "# Plan". Whether an errand is done
 # is the errand CLI's business, and the open interval is the only claim this
 # makes about what is being worked on - so the two cannot fall out of step.
 #

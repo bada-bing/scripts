@@ -14,7 +14,7 @@
 #
 # One-way and machine-owned. The block is replaced whole on every run, so a
 # corrected or deleted interval is reflected simply by running this again, and
-# nothing hand-written survives there - the day's errands belong in "# Errands".
+# nothing hand-written survives there - the day's errands belong in "# Plan".
 #
 # Tasks come first and errands after, each ordered by when its work started. An
 # errand is small and there are many, so one list in time order would bury the
