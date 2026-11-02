@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Render a day's journal `# Health` block from life_sextant (`sxt`).
+"""Render a day's journal `# Parameters` block from life_sextant (`sxt`).
 
 The sxt-era successor to db_to_logseq.py. Instead of the legacy health.db, it asks
 `sxt report --json --keys` for the day's recorded values and writes them as
-`key:: value` property lines under the journal's `# Health` block. The journal is a
+`key:: value` property lines under the journal's `# Parameters` block. The journal is a
 faithful mirror of the store: canonical sxt key names, present values only.
 
 Unlike the old script, this one guarantees the journal exists: a missing-or-empty
@@ -85,7 +85,7 @@ def daily_template_body() -> list:
 
     Skips the template's own property lines (`template-including-parent::`, `collapsed::`)
     and takes the tab-indented child bullets, dropping one tab so they sit at top level:
-    `- # Work\n`, `\t- <Placeholder>\n`, `- # Health\n`.
+    `- # Work\n`, `\t- <Placeholder>\n`, `- # Parameters\n`.
     """
     lines = TEMPLATES.read_text().splitlines(keepends=True)
     anchor = next(
@@ -108,7 +108,7 @@ def daily_template_body() -> list:
     return body
 
 
-# --- the # Health block -------------------------------------------------------------------
+# --- the # Parameters block -------------------------------------------------------------------
 
 def _heading(line: str) -> str:
     """A top-level bullet's heading text, tolerating the leading `- ` Logseq may drop."""
@@ -117,10 +117,10 @@ def _heading(line: str) -> str:
 
 
 def find_health_block(lines: list):
-    """(start, end) of the top-level `# Health` block, or None. `end` is exclusive."""
+    """(start, end) of the top-level `# Parameters` block, or None. `end` is exclusive."""
     start = None
     for i, line in enumerate(lines):
-        if not line.startswith((" ", "\t")) and _heading(line) == "# Health":
+        if not line.startswith((" ", "\t")) and _heading(line) == "# Parameters":
             start = i
             break
     if start is None:
@@ -138,7 +138,7 @@ def line_has_content(line: str) -> bool:
 
 
 def render_health_block(props: dict, header: str) -> list:
-    """The `# Health` heading (preserved verbatim) plus one `key:: value` child per prop."""
+    """The `# Parameters` heading (preserved verbatim) plus one `key:: value` child per prop."""
     lines = [header if header.endswith("\n") else header + "\n"]
     for i, key in enumerate(sorted(props)):
         prefix = "\t- " if i == 0 else "\t  "
@@ -163,7 +163,7 @@ def sync_journal(date: str, dry_run: bool) -> None:
     else:  # no heading in an existing journal — append one
         if lines and not lines[-1].endswith("\n"):
             lines[-1] += "\n"
-        lines = lines + render_health_block(props, "- # Health\n")
+        lines = lines + render_health_block(props, "- # Parameters\n")
 
     new_text = "".join(lines)
     summary = ", ".join(f"{k}={v}" for k, v in sorted(props.items())) or "no data"
