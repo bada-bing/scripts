@@ -195,6 +195,7 @@ case "$verb" in
         # Decline before asking. Offering a list that cannot be acted on wastes the
         # choice and implies something can be started when nothing can.
         "$SCRIPT_DIR/refuse_if_recording.sh" || exit 1
+        "$SCRIPT_DIR/refuse_if_unplanned.sh" || exit 1
 
         selection=$("$SCRIPT_DIR/select_work.sh" --tasks) || exit 1
         [[ -z "$selection" ]] && exit 0

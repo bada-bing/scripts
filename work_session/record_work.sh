@@ -293,6 +293,10 @@ case "$verb" in
         # something open means the operation was called directly.
         $past || "$SCRIPT_DIR/refuse_if_recording.sh" || exit 1
 
+        # Nothing but planning starts before the day is planned. Logging is left
+        # open, since it records work already done rather than starting any.
+        $past || "$SCRIPT_DIR/refuse_if_unplanned.sh" "$key" || exit 1
+
         # Dispatch by resolution rather than by a flag: a pending task means task
         # work, and anything else is an adhoc labelled with the argument itself.
         task_json=$(task_for_key "$key")
