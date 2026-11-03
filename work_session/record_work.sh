@@ -456,8 +456,9 @@ case "$verb" in
         # missing hint rather than a wrong command.
         if [[ "${kind:-}" == "task" ]]; then
             session=$(printf '%s' "$label" | tr '.:' '--')
-            tmux has-session -t="$session" 2>/dev/null \
-                && printf '  to destroy its session: tmux kill-session -t %s\n' "$session"
+            if tmux has-session -t="$session" 2>/dev/null; then
+                printf '  to destroy its session: tmux kill-session -t %s\n' "$session"
+            fi
         fi
         ;;
 
