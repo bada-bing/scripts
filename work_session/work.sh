@@ -15,6 +15,7 @@
 #   work.sh start "<label>"              work with no task, labelled in words
 #   work.sh log <what> <time> <duration> [--date D]  record finished work
 #   work.sh plan <task-key | "<errand>">  add it at the end of today's plan
+#   work.sh done                         stop, then mark the item done for today
 #   work.sh stop                         close the interval, rounded to the
 #                                        quarter once confirmed, render the day
 #   work.sh render [<day>]               render a day's record again
@@ -35,6 +36,8 @@ Usage:
   work log <what> 9:06 1h40m --date 2026-09-19   write up another day
   work plan <task-key>        add the task at the end of today's plan
   work plan "<errand>"        add the errand there, through errand capture
+  work done                   stop as work stop does, then mark the item done
+                              for today
   work stop                   offer to close the task's discussion, then close
                               the interval, rounded to the quarter once confirmed
   work render [<day>]         render a day's record again from Timewarrior
@@ -182,6 +185,40 @@ case "$verb" in
                     echo "  Enter records the rounded times, n the exact ones, or give two times: 08:00 10:45" >&2 ;;
             esac
         done
+        ;;
+
+    # Done is stopping plus marking the item done for today. The item is looked
+    # up before anything is stopped, so a refusal leaves the interval running and
+    # the plan as it was. An errand is marked by errand complete, the only writer
+    # of errands, which finds the interval already closed and touches no time.
+    done)
+        shift
+        for arg in "$@"; do
+            [[ "$arg" == --dry-run ]] || { echo "Error: unknown option $arg" >&2; exit 1; }
+        done
+
+        IFS=$'\t' read -r kind label <<< "$("$SCRIPT_DIR/get_active_identity.sh")"
+        if [[ -z "${label:-}" ]]; then
+            echo "Error: nothing is being recorded" >&2
+            echo "  to mark an errand done without recording: errand complete '<text>'" >&2
+            exit 1
+        fi
+
+        if ! "$SCRIPT_DIR/journal_work_block.sh" list \
+             | awk -F'\t' -v k="$label" -v kind="$kind" \
+                   '(kind == "task" ? $2 : $4) == k { found = 1 } END { exit !found }'; then
+            printf "Error: %s is not in today's plan\n" "$label" >&2
+            echo "  to stop without marking anything: work stop" >&2
+            exit 1
+        fi
+
+        "$0" stop "$@" || exit $?
+
+        if [[ "$kind" == "task" ]]; then
+            "$SCRIPT_DIR/journal_work_block.sh" mark "$label" "$@"
+        else
+            "$SCRIPT_DIR/../errands/errand.sh" complete "$label" "$@"
+        fi
         ;;
 
     # Nothing to pick for: log names work that is over, so there is no list of
