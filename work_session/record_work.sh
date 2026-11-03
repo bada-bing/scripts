@@ -457,8 +457,10 @@ case "$verb" in
         run timew stop :yes >/dev/null || exit 1
 
         # The interval just closed is @1, since ids run newest first by start
-        # and nothing can have started after the one that was running.
-        for edge in start end; do
+        # and nothing can have started after the one that was running. The end
+        # goes first, since a start rounded up can be later than the end the
+        # interval closed with.
+        for edge in end start; do
             stamp="$from"; [[ "$edge" == "end" ]] && stamp="$to"
             [[ -n "$stamp" ]] || continue
             run timew modify "$edge" @1 "$stamp" :yes >/dev/null || exit 1
