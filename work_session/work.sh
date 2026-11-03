@@ -10,7 +10,7 @@
 # never asks a question.
 #
 # Usage:
-#   work.sh                              report the open interval
+#   work.sh                              report the open interval and the day
 #   work.sh start [<what>] [<time>]      pick when nothing is given
 #   work.sh start "<label>"              work with no task, labelled in words
 #   work.sh log <what> <time> <duration> [--date D]  record finished work
@@ -27,7 +27,8 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 usage() {
     cat <<'USAGE'
 Usage:
-  work                        what is being recorded right now
+  work                        what is being recorded right now, the time worked
+                              today and what comes next
   work start                  pick something, then start recording it
   work start <task-key>       start that one, skipping the picker
   work start <what> 16:00     start it, backdated to that time
@@ -98,6 +99,66 @@ close_discussion() {
     esac
 }
 
+# Closes the open interval, asking first whether the task's discussion closes and
+# then where the interval's edges go. Returns what the operation returned.
+stop_interval() {
+    local dry_run=false arg kind label start_epoch now from to answer a b rc
+    for arg in "$@"; do
+        [[ "$arg" == --dry-run ]] && dry_run=true
+    done
+    if [[ "$(timew get dom.active 2>/dev/null || true)" != "1" ]]; then
+        "$SCRIPT_DIR/record_work.sh" stop "$@"
+        return
+    fi
+
+    IFS=$'\t' read -r kind label <<< "$("$SCRIPT_DIR/get_active_identity.sh")"
+    [[ "${kind:-}" == "task" ]] && { close_discussion "$dry_run" "$label" || return 1; }
+
+    start_epoch=$(date -j -u -f '%Y%m%dT%H%M%SZ' \
+        "$(timew get dom.active.json | jq -r .start)" '+%s') || return 1
+    now=$(date '+%s')
+    from=$(quarter "$start_epoch")
+    to=$(quarter "$now")
+    # An interval shorter than a quarter rounds to nothing, and a quarter
+    # is the least the record says about work that happened.
+    [[ "$to" -gt "$from" ]] || to=$((from + 900))
+
+    printf '%s  %s–%s  →  %s–%s (%s)\n' "${label:-an interval with no identity}" \
+        "$(clock "$start_epoch")" "$(clock "$now")" \
+        "$(clock "$from")" "$(clock "$to")" "$(spell $(( (to - from) / 60 )))"
+    while :; do
+        if ! read -r -p "Record $(clock "$from")–$(clock "$to")? [Y/n/<start> <end>] " answer; then
+            echo; echo "No answer; the interval is still running" >&2
+            return 1
+        fi
+        # A refusal, exit 2, is an overlap with what is already recorded,
+        # said with what is in the way; other times can then be given.
+        case "$answer" in
+            ""|y|Y)
+                "$SCRIPT_DIR/record_work.sh" stop --start "$(stamp "$from")" --end "$(stamp "$to")" "$@"
+                rc=$?; [[ "$rc" -eq 2 ]] && continue; return "$rc" ;;
+            n|N)
+                "$SCRIPT_DIR/record_work.sh" stop "$@"; return ;;
+            *)
+                # Two times, each read on the day of the edge it replaces,
+                # so an interval that crossed midnight keeps its days.
+                read -r a b <<< "$answer"
+                if [[ "$a" =~ ^[0-9]{1,2}:[0-9]{2}$ && "$b" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+                    a=$(date -j -f '%Y-%m-%d %H:%M' "$(date -r "$from" '+%Y-%m-%d') $a" '+%s') || continue
+                    b=$(date -j -f '%Y-%m-%d %H:%M' "$(date -r "$to" '+%Y-%m-%d') $b" '+%s') || continue
+                    if [[ "$b" -le "$a" ]]; then
+                        echo "  the end must come after the start" >&2
+                        continue
+                    fi
+                    from=$a; to=$b
+                    "$SCRIPT_DIR/record_work.sh" stop --start "$(stamp "$from")" --end "$(stamp "$to")" "$@"
+                    rc=$?; [[ "$rc" -eq 2 ]] && continue; return "$rc"
+                fi
+                echo "  Enter records the rounded times, n the exact ones, or give two times: 08:00 10:45" >&2 ;;
+        esac
+    done
+}
+
 verb="${1:-}"
 
 case "$verb" in
@@ -112,7 +173,8 @@ case "$verb" in
         ;;
 
     status)
-        exec "$SCRIPT_DIR/record_work.sh" "$@"
+        "$SCRIPT_DIR/record_work.sh" "$@"
+        "$SCRIPT_DIR/report_day.sh"
         ;;
 
     plan)
@@ -129,62 +191,11 @@ case "$verb" in
     # takes the edges as arguments and asks nothing.
     stop)
         shift
-        dry_run=false
         for arg in "$@"; do
-            case "$arg" in
-                --dry-run) dry_run=true ;;
-                *) echo "Error: unknown option $arg" >&2; exit 1 ;;
-            esac
+            [[ "$arg" == --dry-run ]] || { echo "Error: unknown option $arg" >&2; exit 1; }
         done
-        [[ "$(timew get dom.active 2>/dev/null || true)" == "1" ]] \
-            || exec "$SCRIPT_DIR/record_work.sh" stop "$@"
-
-        IFS=$'\t' read -r kind label <<< "$("$SCRIPT_DIR/get_active_identity.sh")"
-        [[ "${kind:-}" == "task" ]] && { close_discussion "$dry_run" "$label" || exit 1; }
-
-        start_epoch=$(date -j -u -f '%Y%m%dT%H%M%SZ' \
-            "$(timew get dom.active.json | jq -r .start)" '+%s') || exit 1
-        now=$(date '+%s')
-        from=$(quarter "$start_epoch")
-        to=$(quarter "$now")
-        # An interval shorter than a quarter rounds to nothing, and a quarter
-        # is the least the record says about work that happened.
-        [[ "$to" -gt "$from" ]] || to=$((from + 900))
-
-        printf '%s  %s–%s  →  %s–%s (%s)\n' "${label:-an interval with no identity}" \
-            "$(clock "$start_epoch")" "$(clock "$now")" \
-            "$(clock "$from")" "$(clock "$to")" "$(spell $(( (to - from) / 60 )))"
-        while :; do
-            if ! read -r -p "Record $(clock "$from")–$(clock "$to")? [Y/n/<start> <end>] " answer; then
-                echo; echo "No answer; the interval is still running" >&2
-                exit 1
-            fi
-            # A refusal, exit 2, is an overlap with what is already recorded,
-            # said with what is in the way; other times can then be given.
-            case "$answer" in
-                ""|y|Y)
-                    "$SCRIPT_DIR/record_work.sh" stop --start "$(stamp "$from")" --end "$(stamp "$to")" "$@"
-                    rc=$?; [[ "$rc" -eq 2 ]] && continue; exit "$rc" ;;
-                n|N)
-                    exec "$SCRIPT_DIR/record_work.sh" stop "$@" ;;
-                *)
-                    # Two times, each read on the day of the edge it replaces,
-                    # so an interval that crossed midnight keeps its days.
-                    read -r a b <<< "$answer"
-                    if [[ "$a" =~ ^[0-9]{1,2}:[0-9]{2}$ && "$b" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
-                        a=$(date -j -f '%Y-%m-%d %H:%M' "$(date -r "$from" '+%Y-%m-%d') $a" '+%s') || continue
-                        b=$(date -j -f '%Y-%m-%d %H:%M' "$(date -r "$to" '+%Y-%m-%d') $b" '+%s') || continue
-                        if [[ "$b" -le "$a" ]]; then
-                            echo "  the end must come after the start" >&2
-                            continue
-                        fi
-                        from=$a; to=$b
-                        "$SCRIPT_DIR/record_work.sh" stop --start "$(stamp "$from")" --end "$(stamp "$to")" "$@"
-                        rc=$?; [[ "$rc" -eq 2 ]] && continue; exit "$rc"
-                    fi
-                    echo "  Enter records the rounded times, n the exact ones, or give two times: 08:00 10:45" >&2 ;;
-            esac
-        done
+        stop_interval "$@" || exit $?
+        "$SCRIPT_DIR/report_day.sh"
         ;;
 
     # Done is stopping plus marking the item done for today. The item is looked
@@ -212,13 +223,14 @@ case "$verb" in
             exit 1
         fi
 
-        "$0" stop "$@" || exit $?
+        stop_interval "$@" || exit $?
 
         if [[ "$kind" == "task" ]]; then
             "$SCRIPT_DIR/journal_work_block.sh" mark "$label" "$@"
         else
             "$SCRIPT_DIR/../errands/errand.sh" complete "$label" "$@"
-        fi
+        fi || exit $?
+        "$SCRIPT_DIR/report_day.sh"
         ;;
 
     # Nothing to pick for: log names work that is over, so there is no list of
@@ -261,7 +273,8 @@ case "$verb" in
 
     ""|-*)
         # Nothing but flags: report, rather than guess at an action.
-        exec "$SCRIPT_DIR/record_work.sh" status "$@"
+        "$SCRIPT_DIR/record_work.sh" status "$@"
+        "$SCRIPT_DIR/report_day.sh"
         ;;
 
     *)
