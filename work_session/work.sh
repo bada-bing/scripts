@@ -203,12 +203,11 @@ case "$verb" in
         IFS=$'\t' read -r kind key <<< "$selection"
         [[ -z "$key" ]] && exit 0
 
-        # The picker shows a task reference in the journal dimmed, so honouring
-        # that here is what makes the row mean what it says. Starting the task is
-        # still a keystroke away, and saying which one is the whole of the answer.
+        # The picker shows a link to a page with no pending task dimmed, so
+        # honouring that here is what makes the row mean what it says.
         if [[ "$kind" == "unstartable" ]]; then
-            printf 'Error: %s is a task reference, not an errand\n' "$key" >&2
-            printf '  tasks are not started from the day block: work start %s\n' "$key" >&2
+            printf 'Error: %s has no pending task\n' "$key" >&2
+            echo "  bootstrap the task if you meant to work on it" >&2
             exit 1
         fi
 
