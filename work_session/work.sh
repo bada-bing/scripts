@@ -14,6 +14,7 @@
 #   work.sh start [<what>] [<time>]      pick when nothing is given
 #   work.sh start "<label>"              work with no task, labelled in words
 #   work.sh log <what> <time> <duration> [--date D]  record finished work
+#   work.sh plan <task-key | "<errand>">  add it at the end of today's plan
 #   work.sh stop                         close the interval, rounded to the
 #                                        quarter once confirmed, render the day
 #   work.sh render [<day>]               render a day's record again
@@ -32,6 +33,8 @@ Usage:
   work start "<label>"        record work that has no task, under that label
   work log <what> 16:00 2h    record work already finished, opening nothing
   work log <what> 9:06 1h40m --date 2026-09-19   write up another day
+  work plan <task-key>        add the task at the end of today's plan
+  work plan "<errand>"        add the errand there, through errand capture
   work stop                   offer to close the task's discussion, then close
                               the interval, rounded to the quarter once confirmed
   work render [<day>]         render a day's record again from Timewarrior
@@ -107,6 +110,11 @@ case "$verb" in
 
     status)
         exec "$SCRIPT_DIR/record_work.sh" "$@"
+        ;;
+
+    plan)
+        shift
+        exec "$SCRIPT_DIR/plan_work.sh" "$@"
         ;;
 
     # Stopping is where the day's record gets its shape, so it is the one verb
