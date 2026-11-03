@@ -164,6 +164,30 @@ case "$verb" in
             exit 1
         fi
 
+        # An errand is addressed by its exact text, so two entries reading the same
+        # thing could not be told apart by errand complete. Refused, as pop and
+        # rename refuse it. A block on stdin is read here to see its text, and then
+        # handed on.
+        if ! $to_backlog; then
+            piped=""
+            if [[ ${#args[@]} -eq 0 ]]; then
+                piped=$(cat)
+                text=$(head -1 <<< "$piped")
+            else
+                text="${args[0]}"
+            fi
+            text="${text#- }"
+            if [[ -n "$text" ]] && today_has "$text"; then
+                printf 'Error: today already has an errand reading: %s\n' "$text" >&2
+                echo "  two entries with one text could not be told apart" >&2
+                exit 1
+            fi
+            if [[ ${#args[@]} -eq 0 ]]; then
+                "$JOURNAL" add ${opts[@]+"${opts[@]}"} <<< "$piped"
+                exit $?
+            fi
+        fi
+
         # Both destinations take the same two inputs - a text argument or a block
         # on stdin - so the argument list is handed on unchanged and stdin is
         # inherited by whichever one runs.
