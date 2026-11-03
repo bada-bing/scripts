@@ -6,11 +6,12 @@
 #
 # A journal holds two blocks about work, and they answer different questions:
 #
-#   # Plan     what is worked today - tasks by their [[KEY]] and errands by their
-#              text, whether captured by hand, taken from the backlog or
+#   # Plan     what is worked today - tasks by a link to their page and errands
+#              by their text, whether captured by hand, taken from the backlog or
 #              instantiated from a chore. Read and written both. Its order is the
-#              prioritisation, so nothing sorts it, and DONE on an entry says it
-#              was completed.
+#              prioritisation, so nothing sorts it. DONE on an entry says it is
+#              done for today, and CANCELED, written by hand, that it is dropped
+#              for today.
 #   # Work     where the time went, rendered from Timewarrior. Machine-owned:
 #              render_work_actuals.sh replaces it wholesale.
 #
@@ -35,7 +36,7 @@
 #
 # --block defaults to Plan, the block a person edits. --date defaults to today.
 # list prints TSV: marker, key, annotation, text - the marker column is empty on
-# anything but a completed errand.
+# anything not done or dropped for today.
 #
 # Dry runs work by applying the real edits to a working copy and diffing it
 # against the journal, so what is shown is what would happen - not a guess.
@@ -156,7 +157,7 @@ function is_entry(l)        { return l ~ /^\t- / }
 function marker_of(l,   m) {
     m = l
     sub(/^\t- /, "", m)
-    if (m ~ /^(LATER|NOW|DONE) /) { sub(/ .*$/, "", m); return m }
+    if (m ~ /^(LATER|NOW|DONE|CANCELED) /) { sub(/ .*$/, "", m); return m }
     return ""
 }
 
@@ -174,7 +175,7 @@ function entry_for_key(l, key,   at, rest) {
 # identity, so the marker is stripped off before comparing.
 function entry_text(l) {
     sub(/^\t- /, "", l)
-    sub(/^(LATER|NOW|DONE) /, "", l)
+    sub(/^(LATER|NOW|DONE|CANCELED) /, "", l)
     return l
 }
 PRELUDE
@@ -242,7 +243,7 @@ case "$verb" in
                 text = $0
                 sub(/^\t- /, "", text)
                 marker = marker_of($0)
-                if (marker != "") sub(/^(LATER|NOW|DONE) /, "", text)
+                if (marker != "") sub(/^(LATER|NOW|DONE|CANCELED) /, "", text)
 
                 # Only a link the entry opens with names a page. A link further
                 # along - "set up [[CHARLIE_09]] next" - is part of what the
@@ -399,6 +400,8 @@ case "$verb" in
             inblock && is_top_level($0) { inblock = 0 }
             inblock && is_entry($0) && (entry_for_key($0, key) || entry_text($0) == key) {
                 if (marker_of($0) == "DONE") { print; next }
+                # An item dropped for today and then done after all is done.
+                sub(/^\t- CANCELED /, "\t- ")
                 sub(/^\t- /, "\t- DONE ")
                 print; next
             }
