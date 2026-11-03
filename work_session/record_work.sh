@@ -297,6 +297,25 @@ case "$verb" in
         # open, since it records work already done rather than starting any.
         $past || "$SCRIPT_DIR/refuse_if_unplanned.sh" "$key" || exit 1
 
+        # A stop rounds its end up to the quarter, which can be later than now,
+        # and Timewarrior opens nothing in the future. So a start in that gap
+        # moves the end of the last interval back to now, and the new interval
+        # opens there. Nothing is open by this point, so the last one is @1.
+        if ! $past && [[ -z "$at" ]]; then
+            last_end=$(timew export today 2>/dev/null \
+                | jq -r '[.[] | select(.end != null) | .end] | max // empty')
+            if [[ -n "$last_end" ]]; then
+                end_epoch=$(date -j -u -f '%Y%m%dT%H%M%SZ' "$last_end" '+%s') || exit 1
+                now_epoch=$(date '+%s')
+                if [[ "$end_epoch" -gt "$now_epoch" ]]; then
+                    at=$(date -r "$now_epoch" '+%Y-%m-%dT%H:%M:%S')
+                    run timew modify end @1 "$at" :yes >/dev/null || exit 1
+                    printf 'the last interval now ends at %s instead of %s\n' \
+                        "$(date -r "$now_epoch" '+%H:%M')" "$(date -r "$end_epoch" '+%H:%M')"
+                fi
+            fi
+        fi
+
         # Dispatch by resolution rather than by a flag: a pending task means task
         # work, and anything else is an adhoc labelled with the argument itself.
         task_json=$(task_for_key "$key")
@@ -359,7 +378,8 @@ case "$verb" in
 
             # An adhoc has no repository and no page, and you are already somewhere
             # when you get interrupted. It is recorded, not inhabited.
-            printf 'recording: %s%s\n' "$key" "${at:+ from $at}"
+            since="${at#*T}"
+            printf 'recording: %s%s\n' "$key" "${at:+ from ${since:0:5}}"
             exit 0
         fi
 
