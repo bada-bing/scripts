@@ -35,8 +35,9 @@
 #   journal_work_block.sh diff                             [--date D]
 #
 # --block defaults to Plan, the block a person edits. --date defaults to today.
-# list prints TSV: marker, key, annotation, text - the marker column is empty on
-# anything not done or dropped for today.
+# list prints TSV: marker, key, annotation, text, planned - the marker column is
+# empty on anything not done or dropped for today, and planned is a task's
+# planned:: property.
 #
 # Dry runs work by applying the real edits to a working copy and diffing it
 # against the journal, so what is shown is what would happen - not a guess.
@@ -236,10 +237,22 @@ case "$verb" in
         [[ -f "$target" ]] && source_file="$target"
         [[ -f "$source_file" ]] || exit 0
 
+        # An entry is printed once its block ends, since its planned:: property
+        # sits on a line below it.
         awk -v BLOCK="$block" "$AWK_PRELUDE"'
+            function flush() {
+                if (pending) printf "%s\t%s\t%s\t%s\t%s\n", marker, key, annot, text, planned
+                pending = 0
+            }
             is_heading($0)        { inblock = 1; next }
-            inblock && is_top_level($0) { inblock = 0 }
+            inblock && is_top_level($0) { flush(); inblock = 0 }
+            inblock && pending && /^\t  planned:: / {
+                planned = $0
+                sub(/^\t  planned:: */, "", planned)
+                sub(/[[:space:]]+$/, "", planned)
+            }
             inblock && is_entry($0) {
+                flush()
                 text = $0
                 sub(/^\t- /, "", text)
                 marker = marker_of($0)
@@ -258,8 +271,10 @@ case "$verb" in
                     if (match(link, /^[A-Za-z0-9]+[-_][0-9]+/))
                         key = substr(link, RSTART, RLENGTH)
                 }
-                printf "%s\t%s\t%s\t%s\n", marker, key, annot, text
+                planned = ""
+                pending = 1
             }
+            END { flush() }
         ' "$source_file"
         ;;
 
