@@ -18,6 +18,7 @@
 #   work.sh done                         stop, then mark the item done for today
 #   work.sh stop                         close the interval at its exact time,
 #                                        render the day
+#   work.sh round [<day>]                round the day's intervals to the quarter
 #   work.sh render [<day>]               render a day's record again
 
 set -uo pipefail
@@ -41,6 +42,8 @@ Usage:
                               for today
   work stop                   offer to close the task's discussion, then close
                               the interval at its exact time
+  work round [<day>]          round the day's intervals to the nearest quarter,
+                              once, at the close-up
   work render [<day>]         render a day's record again from Timewarrior
 
 --dry-run works throughout: it applies nothing and prints what it would do.
@@ -76,7 +79,7 @@ close_discussion() {
 }
 
 # Closes the open interval at its exact times, asking first whether the task's
-# discussion closes.
+# discussion closes. The close-up rounds the day once, with work round.
 stop_interval() {
     local dry_run=false arg kind label
     for arg in "$@"; do
@@ -112,9 +115,15 @@ case "$verb" in
         exec "$SCRIPT_DIR/plan_work.sh" "$@"
         ;;
 
+    round)
+        shift
+        exec "$SCRIPT_DIR/round_work.sh" "$@"
+        ;;
+
     # Stopping asks one thing: whether the task's discussion closes, since
     # closing reconciles the knowledge base's git and belongs before the
-    # interval is recorded. The interval is recorded at its exact times.
+    # interval is recorded. The interval is recorded at its exact times, and
+    # work round makes the day round once, at the close-up.
     stop)
         shift
         for arg in "$@"; do
